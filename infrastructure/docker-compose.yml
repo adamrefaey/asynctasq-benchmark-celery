@@ -1,0 +1,112 @@
+services:
+  # ============================================================================
+  # Redis - Message Broker for asynctasq & Celery
+  # ============================================================================
+  
+  redis:
+    image: redis:8.4-alpine
+    container_name: benchmark-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - redis-data:/data
+    networks:
+      - benchmark-net
+
+  # ============================================================================
+  # Monitoring Stack (Optional - for metrics visualization)
+  # ============================================================================
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    container_name: benchmark-prometheus
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=7d'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - benchmark-net
+    depends_on:
+      - node-exporter
+    profiles:
+      - monitoring
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: benchmark-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: false
+      GF_INSTALL_PLUGINS: grafana-clock-panel
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    networks:
+      - benchmark-net
+    depends_on:
+      - prometheus
+    profiles:
+      - monitoring
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: benchmark-node-exporter
+    ports:
+      - "9100:9100"
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    networks:
+      - benchmark-net
+    profiles:
+      - monitoring
+
+  # ============================================================================
+  # Mock API Server (for I/O-bound tests)
+  # ============================================================================
+
+  mock-api:
+    build:
+      context: ..
+      dockerfile: infrastructure/Dockerfile.mock-api
+    container_name: benchmark-mock-api
+    ports:
+      - "8080:8080"
+    environment:
+      WORKERS: 4
+      LOG_LEVEL: warning
+    networks:
+      - benchmark-net
+    profiles:
+      - mock-api
+
+networks:
+  benchmark-net:
+    driver: bridge
+
+volumes:
+  redis-data:
+  prometheus-data:
+  grafana-data:

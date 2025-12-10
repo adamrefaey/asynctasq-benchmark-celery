@@ -1,0 +1,41 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+  external_labels:
+    environment: 'benchmark'
+    project: 'asynctasq-vs-celery'
+
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # System metrics via node-exporter
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+        labels:
+          instance: 'benchmark-host'
+
+  # AsyncTasQ metrics (pushed via prometheus_client in benchmark scripts)
+  - job_name: 'asynctasq'
+    static_configs:
+      - targets: ['host.docker.internal:8000']  # Adjust port as needed
+        labels:
+          framework: 'asynctasq'
+
+  # Celery metrics (via Flower or custom exporter)
+  - job_name: 'celery'
+    static_configs:
+      - targets: ['host.docker.internal:5555']  # Flower metrics endpoint
+        labels:
+          framework: 'celery'
+
+  # Redis metrics (via redis_exporter if added)
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:6379']
+        labels:
+          service: 'redis'
+

@@ -1,0 +1,15 @@
+FROM python:3.14-slim
+
+WORKDIR /app
+
+# Install FastAPI and uvicorn
+RUN pip install --no-cache-dir fastapi==0.115.6 uvicorn[standard]==0.34.0
+
+# Copy mock API server
+COPY infrastructure/mock_api.py .
+
+# Expose port
+EXPOSE 8080
+
+# Run with uvicorn
+CMD ["uvicorn", "mock_api:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "4"]
