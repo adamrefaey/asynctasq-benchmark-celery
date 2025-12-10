@@ -38,7 +38,7 @@ app.conf.update(
 # ============================================================================
 
 
-@app.task
+@app.task(ignore_result=True)  # Disable result backend for throughput test
 def noop_task() -> None:
     """Minimal task with no processing (baseline throughput test)."""
     pass

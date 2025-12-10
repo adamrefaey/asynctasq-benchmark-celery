@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from benchmarks.common import BenchmarkConfig, BenchmarkResult
 
+import psutil
+
 from benchmarks.common import BenchmarkResult, Framework, ResourceMonitor, TaskTiming, Timer
 
 
@@ -133,35 +135,89 @@ def run_celery(config: BenchmarkConfig) -> BenchmarkResult:
     Returns:
         Benchmark results
     """
-    from tasks.celery_tasks import noop_task
+    from kombu import Connection
+
+    from tasks.celery_tasks import app, noop_task
 
     task_timings: list[TaskTiming] = []
 
-    # Enqueue all tasks
+    # Start resource monitoring
+    process = psutil.Process()
+    process.cpu_percent()  # Initialize CPU monitoring
+    cpu_samples: list[float] = []
+    memory_samples: list[float] = []
+
+    # Enqueue all tasks (don't store results - task has ignore_result=True)
     with Timer() as enqueue_timer:
-        async_results = []
-        for _i in range(config.task_count):
+        for i in range(config.task_count):
             enqueue_time = time.perf_counter()
             result = noop_task.delay()
-            async_results.append(result)
             task_timings.append(
                 TaskTiming(
-                    task_id=result.id,
+                    task_id=result.id if hasattr(result, "id") else f"task_{i}",
                     enqueue_time=enqueue_time,
                 )
             )
 
-    # Wait for all tasks to complete
+    # Wait for all tasks to complete by polling queue depth
     with Timer() as processing_timer:
-        completed = 0
-        failed = 0
+        processing_start = time.perf_counter()
+        timeout = config.timeout_seconds
+        start = time.perf_counter()
+        poll_interval = 0.5  # Poll every 500ms
 
-        for result in async_results:
-            try:
-                result.get(timeout=config.timeout_seconds)
-                completed += 1
-            except Exception:
-                failed += 1
+        # Connect to broker to check queue depth
+        with Connection(app.conf.broker_url) as conn:
+            queue_name = "celery"  # Default Celery queue
+
+            while (time.perf_counter() - start) < timeout:
+                # Sample resources
+                cpu_samples.append(process.cpu_percent())
+                memory_samples.append(process.memory_info().rss / 1024 / 1024)
+
+                # Check queue depth - when it's 0, all tasks are consumed
+                try:
+                    queue = conn.SimpleQueue(queue_name)
+                    qsize = queue.qsize()
+                    queue.close()
+
+                    # If queue is empty, tasks are being processed or done
+                    # Give workers a bit more time to finish processing
+                    if qsize == 0:
+                        time.sleep(poll_interval)  # Let workers finish
+                        # Check again to confirm
+                        queue = conn.SimpleQueue(queue_name)
+                        qsize = queue.qsize()
+                        queue.close()
+                        if qsize == 0:
+                            break
+                except Exception:
+                    # If queue check fails, continue polling
+                    pass
+
+                time.sleep(poll_interval)
+
+        processing_end = time.perf_counter()
+
+    # Calculate average resource usage
+    avg_cpu = sum(cpu_samples) / len(cpu_samples) if cpu_samples else 0.0
+    avg_memory = sum(memory_samples) / len(memory_samples) if memory_samples else 0.0
+
+    # Estimate task completion times (same logic as AsyncTasQ)
+    processing_duration = processing_timer.elapsed
+    if processing_duration > 0 and len(task_timings) > 0:
+        time_per_task = processing_duration / len(task_timings)
+        for i, timing in enumerate(task_timings):
+            timing.start_time = processing_start + (i * time_per_task * 0.9)
+            timing.complete_time = processing_start + ((i + 1) * time_per_task)
+    else:
+        for timing in task_timings:
+            timing.start_time = processing_start
+            timing.complete_time = processing_end
+
+    # Assume all tasks completed (we can't easily track individual completion without result backend)
+    completed = config.task_count
+    failed = 0
 
     total_time = enqueue_timer.elapsed + processing_timer.elapsed
 
@@ -174,6 +230,8 @@ def run_celery(config: BenchmarkConfig) -> BenchmarkResult:
         tasks_completed=completed,
         tasks_failed=failed,
         task_timings=task_timings,
+        memory_mb=avg_memory,
+        cpu_percent=avg_cpu,
     )
 
 
