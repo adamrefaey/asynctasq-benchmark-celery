@@ -42,15 +42,14 @@ async def run_asynctasq(config: BenchmarkConfig) -> BenchmarkResult:
         # Manually delete Redis keys since driver doesn't have purge_queue
         # This ensures no leftover tasks from previous runs affect results
         if hasattr(driver, "client") and driver.client:
-            deleted = await driver.client.delete(
+            await driver.client.delete(
                 "queue:default",
                 "queue:default:processing",
                 "queue:default:delayed",
                 "queue:default:dead",
             )
-            print(f"[AsyncTasQ] Purged {deleted} queue keys before benchmark")
         else:
-            print("[AsyncTasQ] Warning: Cannot access Redis client for queue purge")
+            pass
     except Exception as e:
         print(f"[AsyncTasQ] Warning: Could not purge queue: {e}")
         # Continue anyway - workers should handle existing tasks
@@ -72,7 +71,6 @@ async def run_asynctasq(config: BenchmarkConfig) -> BenchmarkResult:
     test_data = b"x" * (10 * 1024 * 1024)
 
     # Enqueue all tasks
-    print(f"[AsyncTasQ] Starting to enqueue {config.task_count} tasks...")
     enqueue_start = time.perf_counter()
     task_ids = []
 
@@ -89,11 +87,6 @@ async def run_asynctasq(config: BenchmarkConfig) -> BenchmarkResult:
 
     enqueue_end = time.perf_counter()
     enqueue_duration = enqueue_end - enqueue_start
-    enqueue_rate = config.task_count / enqueue_duration
-    print(
-        f"[AsyncTasQ] Enqueued {config.task_count} tasks in {enqueue_duration:.2f}s "
-        f"({enqueue_rate:.0f} tasks/sec)"
-    )
 
     # Wait for all tasks to complete by polling queue depth
     processing_start = time.perf_counter()
@@ -108,8 +101,6 @@ async def run_asynctasq(config: BenchmarkConfig) -> BenchmarkResult:
     last_pending = None
     same_pending_count = 0
 
-    print(f"[AsyncTasQ] Waiting for {config.task_count} tasks to complete (timeout: {timeout}s)...")
-    timed_out = False
     while (time.perf_counter() - start) < timeout:
         # Get global stats from driver to check completion
         try:
@@ -121,29 +112,18 @@ async def run_asynctasq(config: BenchmarkConfig) -> BenchmarkResult:
             timestamp = time.perf_counter()
             queue_depth_samples.append((timestamp, pending + running))
 
-            # Debug output every 5 seconds
-            elapsed = time.perf_counter() - start
-            if int(elapsed) % 5 == 0 and elapsed > 0:
-                print(
-                    f"[AsyncTasQ] Processing... pending={pending}, running={running}, elapsed={elapsed:.1f}s"
-                )
-
             # Check if all tasks are done (pending + running == 0)
             if pending == 0 and running == 0:
                 # All tasks processed - calculate completed/failed
                 # Since we don't track individual task outcomes, assume all completed
                 completed = config.task_count
                 failed = 0
-                print(f"[AsyncTasQ] All tasks completed in {elapsed:.2f}s")
                 break
 
             # Detect if we're stuck (pending count hasn't changed in 30 seconds)
             if pending == last_pending:
                 same_pending_count += 1
                 if same_pending_count > 60:  # 60 polls * 0.5s = 30s
-                    print(
-                        f"[AsyncTasQ] Warning: Pending count stuck at {pending} for 30s, assuming completion"
-                    )
                     completed = config.task_count - pending
                     failed = pending
                     break
@@ -151,16 +131,13 @@ async def run_asynctasq(config: BenchmarkConfig) -> BenchmarkResult:
                 same_pending_count = 0
                 last_pending = pending
 
-        except Exception as e:
-            # If stats query fails, log and continue polling
-            print(f"[AsyncTasQ] Error getting stats: {e}")
+        except Exception:
+            # If stats query fails, continue polling
             pass
 
         await asyncio.sleep(poll_interval)
     else:
-        # Timeout occurred - log warning and calculate partial completion
-        timed_out = True
-        print(f"[AsyncTasQ] WARNING: Timeout after {timeout}s - tasks may not have completed")
+        # Timeout occurred - calculate partial completion
         try:
             stats = await driver.get_global_stats()
             pending = stats.get("pending", 0)
@@ -177,17 +154,6 @@ async def run_asynctasq(config: BenchmarkConfig) -> BenchmarkResult:
 
     # Stop resource monitoring and get averages
     avg_cpu, avg_memory = await monitor.stop()
-
-    if timed_out:
-        print(
-            f"[AsyncTasQ] WARNING: Benchmark timed out - only {completed}/{config.task_count} "
-            f"tasks completed, {failed} failed/pending"
-        )
-    else:
-        print(
-            f"[AsyncTasQ] Processing complete: {completed}/{config.task_count} tasks, "
-            f"{failed} failed in {processing_duration:.2f}s"
-        )
 
     # Estimate task completion times
     # NOTE: Without worker instrumentation, we use queue depth samples to estimate
@@ -229,9 +195,7 @@ async def run_asynctasq(config: BenchmarkConfig) -> BenchmarkResult:
     total_time = enqueue_duration + processing_duration
 
     # Clean up before disconnect
-    print(f"[AsyncTasQ] Run {config.runs} complete, disconnecting...")
     await driver.disconnect()
-    print("[AsyncTasQ] Disconnected successfully")
 
     return BenchmarkResult(
         config=config,
@@ -280,7 +244,6 @@ def run_celery(config: BenchmarkConfig) -> BenchmarkResult:
     test_data = b"x" * (10 * 1024 * 1024)
 
     # Enqueue all tasks (tasks store results in backend)
-    print(f"[Celery] Starting to enqueue {config.task_count} tasks...")
     with Timer() as enqueue_timer:
         for _i in range(config.task_count):
             enqueue_time = time.perf_counter()
@@ -292,18 +255,8 @@ def run_celery(config: BenchmarkConfig) -> BenchmarkResult:
                 )
             )
 
-    enqueue_rate = config.task_count / enqueue_timer.elapsed
-    print(
-        f"[Celery] Enqueued {config.task_count} tasks in {enqueue_timer.elapsed:.2f}s "
-        f"({enqueue_rate:.0f} tasks/sec)"
-    )
-
     # Wait for all tasks to complete by polling queue depth
     queue_depth_samples: list[tuple[float, int]] = []
-
-    print(
-        f"[Celery] Waiting for {config.task_count} tasks to complete (timeout: {config.timeout_seconds}s)..."
-    )
 
     with Timer() as processing_timer:
         processing_start = time.perf_counter()
@@ -337,9 +290,6 @@ def run_celery(config: BenchmarkConfig) -> BenchmarkResult:
                         consecutive_empty += 1
                         # After 3 consecutive empty checks (1.5 seconds), assume done
                         if consecutive_empty >= 3:
-                            print(
-                                f"[Celery] Queue empty for {consecutive_empty * poll_interval:.1f}s, assuming completion"
-                            )
                             break
                     else:
                         consecutive_empty = 0  # Reset counter if queue has tasks
@@ -348,20 +298,14 @@ def run_celery(config: BenchmarkConfig) -> BenchmarkResult:
                     # If queue doesn't exist (404 NOT_FOUND), all tasks are consumed
                     # This happens when Redis queue is completely drained
                     if "NOT_FOUND" in str(e) or "404" in str(e):
-                        print("[Celery] Queue not found (fully drained), tasks complete")
                         break
-                    # For other errors, log and continue polling
-                    print(f"[Celery] Warning: Error checking queue: {e}")
+                    # For other errors, continue polling
                     pass
 
                 time.sleep(poll_interval)
 
         processing_end = time.perf_counter()
         processing_duration = processing_timer.elapsed
-
-        # Check if we timed out
-        if (time.perf_counter() - start) >= timeout:
-            print(f"[Celery] WARNING: Timeout after {timeout}s - tasks may not have completed")
 
     # Calculate average resource usage
     avg_cpu = sum(cpu_samples) / len(cpu_samples) if cpu_samples else 0.0
@@ -370,11 +314,6 @@ def run_celery(config: BenchmarkConfig) -> BenchmarkResult:
     # Assume all tasks completed (we can't easily track individual completion without checking results)
     completed = config.task_count
     failed = 0
-
-    print(
-        f"[Celery] Processing complete: {completed}/{config.task_count} tasks in "
-        f"{processing_duration:.2f}s ({completed / processing_duration:.0f} tasks/sec)"
-    )
 
     # Estimate task completion times using queue depth samples
     # NOTE: Without worker instrumentation, we use queue depth to estimate completion
