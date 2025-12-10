@@ -192,14 +192,14 @@ wheels = [
 
 [[package]]
 name = "asynctasq"
-version = "0.9.12"
+version = "0.9.13"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "msgpack" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f9/4a/c602aa7f95b53d566fabef1bb8614888395c5d7957fad5017346665f53b2/asynctasq-0.9.12.tar.gz", hash = "sha256:003d81ea974207e7ed44f67cde853b2d79a859e146be248c9db3bec0dab2d1af", size = 372202, upload-time = "2025-12-10T09:32:40.23Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/20/ca/ebab72075bbf302a4fc34e8827f2de9e61aeca0b5a7d923345c0cc2db213/asynctasq-0.9.13.tar.gz", hash = "sha256:918afa584bfdf77f455950553022324f3515c6b6e90903c89ca1fd4c2bb9f492", size = 381577, upload-time = "2025-12-10T15:10:51.62Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/06/06/1dce2357f1f2046a142f6c747e90861b45c71ced643d03547496b95dbbed/asynctasq-0.9.12-py3-none-any.whl", hash = "sha256:27c91805b3132d2c312041fbf5b145b2d1c5bb289d17a3f1f0d8ab935a36aa0c", size = 96105, upload-time = "2025-12-10T09:32:39.189Z" },
+    { url = "https://files.pythonhosted.org/packages/99/cb/df5cb1f2814b7fd9f0ed9b247e9cd149536a10dbbaa58111a9006e830d0e/asynctasq-0.9.13-py3-none-any.whl", hash = "sha256:62dda70d0788449b050149eed4ebe018896ab50d2f8e7d2bcb715e023ef3b1ab", size = 98143, upload-time = "2025-12-10T15:10:48.951Z" },
 ]
 
 [[package]]
@@ -245,7 +245,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.11.10" },
-    { name = "asynctasq", specifier = ">=0.9.12" },
+    { name = "asynctasq", specifier = ">=0.9.13" },
     { name = "celery", specifier = ">=5.6.0" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "kombu", specifier = ">=5.6.0" },
