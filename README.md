@@ -30,24 +30,32 @@ This benchmarking suite implements focused performance testing between AsyncTasQ
 ## Quick Start
 
 ```bash
-# Install dependencies
+# 1. Install dependencies
 just init
 
-# Start Redis infrastructure
+# 2. Start Redis infrastructure
 just docker-up
 
-# Run all benchmarks (takes ~2 hours)
-just benchmark-all
+# 3. Start workers (REQUIRED - open in separate terminals)
+# Terminal 1: AsyncTasQ worker
+just worker-asynctasq
 
-# Run specific scenario
-just benchmark scenario1  # Basic throughput test
+# Terminal 2: Celery worker (if testing Celery scenarios)
+just worker-celery
 
-# View results
+# 4. Run benchmarks (in Terminal 3)
+just benchmark-all  # All scenarios
+just benchmark 1    # Single scenario
+
+# 5. View results
 just report  # Generate HTML report with charts
 
-# Stop infrastructure
+# 6. Stop everything
+# Ctrl+C in worker terminals, then:
 just docker-down
 ```
+
+**⚠️ CRITICAL: Workers MUST be running before starting benchmarks!** The benchmark runner does not start workers automatically. See [Worker Setup](./WORKER_SETUP.md) for details.
 
 ## Architecture
 

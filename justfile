@@ -79,6 +79,20 @@ check-health:
     @echo "Redis: $(docker compose -f infrastructure/docker-compose.yml exec -T redis redis-cli ping 2>/dev/null || echo 'DOWN')"
 
 # ============================================================================
+# Workers
+# ============================================================================
+
+# Start AsyncTasQ worker (foreground)
+worker-asynctasq:
+    @echo "🚀 Starting AsyncTasQ worker..."
+    python -m asynctasq worker --queue default --concurrency 10
+
+# Start Celery worker (foreground)
+worker-celery:
+    @echo "🚀 Starting Celery worker..."
+    uv run celery -A tasks.celery_tasks worker --loglevel=info --concurrency=10
+
+# ============================================================================
 # Benchmarking
 # ============================================================================
 
