@@ -107,6 +107,10 @@ async def run_scenario(
 
             progress.advance(task)
 
+            # Small delay between runs to allow cleanup and connection closure
+            if run < runs:
+                await asyncio.sleep(1.0)
+
     summary = BenchmarkSummary(config=config, results=results)
 
     # Display results
@@ -193,7 +197,7 @@ def _display_summary(scenario_id: str, scenario_name: str, summary: BenchmarkSum
     )
 
     console.print(table)
-    
+
     # Display stability indicator
     cv = summary.throughput_coefficient_of_variation
     if cv < 0.1:
@@ -202,7 +206,7 @@ def _display_summary(scenario_id: str, scenario_name: str, summary: BenchmarkSum
         stability_msg = f"[yellow]⚠ Good stability (CV: {cv:.3f})[/yellow]"
     else:
         stability_msg = f"[red]⚠ High variance - results may be unreliable (CV: {cv:.3f})[/red]"
-    
+
     console.print(f"\n{stability_msg}")
 
 

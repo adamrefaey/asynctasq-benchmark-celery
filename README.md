@@ -34,7 +34,9 @@ This benchmarking suite implements focused performance testing between AsyncTasQ
 just init
 
 # 2. Start Redis infrastructure
-just docker-up
+just docker-up              # For Scenario 1 only (minimal tasks)
+# OR
+just docker-up-mock         # For Scenarios 2+ (includes Mock API on port 8080)
 
 # 3. ⚠️ START WORKERS FIRST (REQUIRED!)
 #    Open separate terminal windows for each worker:
@@ -57,7 +59,9 @@ just report  # Generate HTML report with charts
 just docker-down
 ```
 
-**⚠️ CRITICAL:** The benchmark runner **DOES NOT start workers automatically**. You **MUST** start workers in separate terminals before running `just benchmark-all` or the benchmark will freeze. See [Worker Setup](./WORKER_SETUP.md) for details.
+**⚠️ CRITICAL:** 
+- The benchmark runner **DOES NOT start workers automatically**. You **MUST** start workers in separate terminals before running `just benchmark-all` or the benchmark will freeze. See [Worker Setup](./WORKER_SETUP.md) for details.
+- **Scenario 2 (I/O-bound)** requires the Mock API server. Use `just docker-up-mock` instead of `just docker-up`.
 
 ## Architecture
 
@@ -73,19 +77,19 @@ asynctasq-benchmark-celery/
 
 ## Scenarios
 
-| Scenario | Description | Key Metrics |
-|----------|-------------|-------------|
-| 1 | Basic Throughput (20k minimal tasks) | tasks/sec, enqueue rate |
-| 2 | I/O-Bound (HTTP requests with mock server) | async scaling efficiency |
-| 3 | CPU-Bound (ProcessTask vs prefork) | GIL impact, process parallelism |
-| 4 | Mixed Workload (60% I/O, 30% light CPU, 10% heavy CPU) | realistic performance |
-| 5 | Serialization (msgpack vs JSON/pickle, ORM models) | payload size, speed |
-| 6 | Scalability (1k → 100k task ramp-up) | saturation point, queue depth |
-| 7 | Real-World (e-commerce order pipeline) | end-to-end latency, retry behavior |
-| 8 | Cold Start (worker initialization time) | startup latency, first task |
-| 9 | Multi-Queue (priority queues, routing) | queue management |
-| 10 | Event Streaming (Redis Pub/Sub overhead) | event delivery latency |
-| 11 | FastAPI Integration (lifespan overhead) | HTTP dispatch performance |
+| Scenario | Description | Key Metrics | Requirements |
+|----------|-------------|-------------|--------------|
+| 1 | Basic Throughput (20k minimal tasks) | tasks/sec, enqueue rate | Redis only |
+| 2 | I/O-Bound (HTTP requests with mock server) | async scaling efficiency | **Mock API required** (`just docker-up-mock`) |
+| 3 | CPU-Bound (ProcessTask vs prefork) | GIL impact, process parallelism | Redis only |
+| 4 | Mixed Workload (60% I/O, 30% light CPU, 10% heavy CPU) | realistic performance | **Mock API required** |
+| 5 | Serialization (msgpack vs JSON/pickle, ORM models) | payload size, speed | Redis only |
+| 6 | Scalability (1k → 100k task ramp-up) | saturation point, queue depth | Redis only |
+| 7 | Real-World (e-commerce order pipeline) | end-to-end latency, retry behavior | **Mock API required** |
+| 8 | Cold Start (worker initialization time) | startup latency, first task | Redis only |
+| 9 | Multi-Queue (priority queues, routing) | queue management | Redis only |
+| 10 | Event Streaming (Redis Pub/Sub overhead) | event delivery latency | Redis only |
+| 11 | FastAPI Integration (lifespan overhead) | HTTP dispatch performance | Redis only |
 
 ## Requirements
 

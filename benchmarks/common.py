@@ -40,6 +40,7 @@ class BenchmarkConfig:
     worker_count: int = 10
     task_count: int = 20000
     runs: int = 10
+    warmup_seconds: int = 0
     timeout_seconds: int = 300
 
     # Worker configuration
@@ -218,7 +219,7 @@ class BenchmarkSummary:
     @property
     def throughput_coefficient_of_variation(self) -> float:
         """Coefficient of variation for throughput (lower is more stable).
-        
+
         CV < 0.1 = excellent stability
         CV 0.1-0.2 = good stability
         CV > 0.2 = high variance, results may be unreliable
@@ -314,7 +315,7 @@ class ResourceMonitor:
             try:
                 # CPU percent (per-core, so can exceed 100%)
                 cpu = self.process.cpu_percent(interval=None)
-                
+
                 # Only include non-zero CPU samples (skip initial warmup)
                 if cpu > 0.0 or len(self.cpu_samples) > 0:
                     self.cpu_samples.append(cpu)

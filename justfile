@@ -29,9 +29,9 @@ setup-monitoring:
 
 # Start infrastructure services (Redis, optional Prometheus/Grafana for monitoring)
 docker-up:
-    @echo "🐳 Starting Redis and core infrastructure..."
-    docker compose -f infrastructure/docker-compose.yml up -d redis
-    @echo "⏳ Waiting for Redis to be healthy..."
+    @echo "🐳 Starting all infrastructure services..."
+    docker compose -f infrastructure/docker-compose.yml up -d
+    @echo "⏳ Waiting for services to be healthy..."
     sleep 5
     @just check-health
 
@@ -46,7 +46,7 @@ docker-up-monitoring:
 # Start infrastructure with mock API
 docker-up-mock:
     @echo "🐳 Starting Redis and mock API..."
-    docker compose -f infrastructure/docker-compose.yml --profile mock-api up -d
+    docker compose -f infrastructure/docker-compose.yml up -d redis mock-api
     @echo "⏳ Waiting for services to be healthy..."
     sleep 5
     @just check-health

@@ -37,6 +37,20 @@ async def run_asynctasq(config: BenchmarkConfig) -> BenchmarkResult:
     driver = DriverFactory.create_from_config(cfg)
     await driver.connect()
 
+    # Purge queue to ensure clean state (critical for multi-run benchmarks)
+    try:
+        # Manually delete Redis keys since driver doesn't have purge_queue
+        if hasattr(driver, "client") and driver.client:
+            await driver.client.delete(
+                "queue:default",
+                "queue:default:processing",
+                "queue:default:delayed",
+                "queue:default:dead",
+            )
+            print(f"[AsyncTasQ] Purged queue before run {config.runs}")
+    except Exception as e:
+        print(f"[AsyncTasQ] Warning: Could not purge queue: {e}")
+
     # NOTE: Warmup is handled by workers being pre-started.
     # The benchmark assumes workers are already running and ready to process tasks.
     # This avoids the benchmark script needing to manage worker lifecycle.
@@ -64,6 +78,7 @@ async def run_asynctasq(config: BenchmarkConfig) -> BenchmarkResult:
 
     enqueue_end = time.perf_counter()
     enqueue_duration = enqueue_end - enqueue_start
+    print(f"[AsyncTasQ] Enqueued {config.task_count} tasks in {enqueue_duration:.2f}s")
 
     # Wait for all tasks to complete by polling queue depth
     processing_start = time.perf_counter()
@@ -75,16 +90,26 @@ async def run_asynctasq(config: BenchmarkConfig) -> BenchmarkResult:
     failed = 0
     queue_depth_samples: list[tuple[float, int]] = []
 
+    last_pending = None
+    same_pending_count = 0
+
     while (time.perf_counter() - start) < timeout:
         # Get global stats from driver to check completion
         try:
             stats = await driver.get_global_stats()
             pending = stats.get("pending", 0)
             running = stats.get("running", 0)
-            
+
             # Track queue depth (pending + running tasks)
             timestamp = time.perf_counter()
             queue_depth_samples.append((timestamp, pending + running))
+
+            # Debug output every 5 seconds
+            elapsed = time.perf_counter() - start
+            if int(elapsed) % 5 == 0 and elapsed > 0:
+                print(
+                    f"[AsyncTasQ] Processing... pending={pending}, running={running}, elapsed={elapsed:.1f}s"
+                )
 
             # Check if all tasks are done (pending + running == 0)
             if pending == 0 and running == 0:
@@ -92,10 +117,26 @@ async def run_asynctasq(config: BenchmarkConfig) -> BenchmarkResult:
                 # Since we don't track individual task outcomes, assume all completed
                 completed = config.task_count
                 failed = 0
+                print(f"[AsyncTasQ] All tasks completed in {elapsed:.2f}s")
                 break
 
-        except Exception:
-            # If stats query fails, continue polling
+            # Detect if we're stuck (pending count hasn't changed in 30 seconds)
+            if pending == last_pending:
+                same_pending_count += 1
+                if same_pending_count > 60:  # 60 polls * 0.5s = 30s
+                    print(
+                        f"[AsyncTasQ] Warning: Pending count stuck at {pending} for 30s, assuming completion"
+                    )
+                    completed = config.task_count - pending
+                    failed = pending
+                    break
+            else:
+                same_pending_count = 0
+                last_pending = pending
+
+        except Exception as e:
+            # If stats query fails, log and continue polling
+            print(f"[AsyncTasQ] Error getting stats: {e}")
             pass
 
         await asyncio.sleep(poll_interval)
@@ -105,6 +146,9 @@ async def run_asynctasq(config: BenchmarkConfig) -> BenchmarkResult:
 
     # Stop resource monitoring and get averages
     avg_cpu, avg_memory = await monitor.stop()
+    print(
+        f"[AsyncTasQ] Processing complete: {completed}/{config.task_count} tasks, {failed} failed"
+    )
 
     # Estimate task completion times
     # Without worker instrumentation, we assume tasks complete at steady rate
@@ -123,7 +167,10 @@ async def run_asynctasq(config: BenchmarkConfig) -> BenchmarkResult:
 
     total_time = enqueue_duration + processing_duration
 
+    # Clean up before disconnect
+    print(f"[AsyncTasQ] Run {config.runs} complete, disconnecting...")
     await driver.disconnect()
+    print("[AsyncTasQ] Disconnected successfully")
 
     return BenchmarkResult(
         config=config,
