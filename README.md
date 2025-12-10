@@ -4,9 +4,9 @@ Production-grade benchmarking infrastructure for comprehensive performance compa
 
 ## ⚡ Recent Optimizations (Dec 2025)
 
-This benchmark suite now implements **cutting-edge async benchmarking practices** based on research of 7+ Python task queue libraries and academic microbenchmarking literature:
+This benchmark suite implements **cutting-edge async benchmarking practices** based on research of 7+ Python task queue libraries and academic microbenchmarking literature:
 
-- ✅ **Warmup phase** - Stabilizes JIT, Redis connections, system caches (eliminates 20-50% startup variance)
+- ✅ **Pre-warmed workers** - Workers must be running before benchmarks start (eliminates startup variance)
 - ✅ **Queue depth monitoring** - Real-time backlog tracking to detect consumer lag
 - ✅ **Statistical validation** - Coefficient of Variation (CV) checks for result stability
 - ✅ **Enhanced resource monitoring** - Improved CPU/memory sampling with artifact filtering
@@ -36,14 +36,16 @@ just init
 # 2. Start Redis infrastructure
 just docker-up
 
-# 3. Start workers (REQUIRED - open in separate terminals)
+# 3. ⚠️ START WORKERS FIRST (REQUIRED!)
+#    Open separate terminal windows for each worker:
+
 # Terminal 1: AsyncTasQ worker
 just worker-asynctasq
 
 # Terminal 2: Celery worker (if testing Celery scenarios)
 just worker-celery
 
-# 4. Run benchmarks (in Terminal 3)
+# 4. Run benchmarks (in Terminal 3, AFTER workers are running)
 just benchmark-all  # All scenarios
 just benchmark 1    # Single scenario
 
@@ -55,7 +57,7 @@ just report  # Generate HTML report with charts
 just docker-down
 ```
 
-**⚠️ CRITICAL: Workers MUST be running before starting benchmarks!** The benchmark runner does not start workers automatically. See [Worker Setup](./WORKER_SETUP.md) for details.
+**⚠️ CRITICAL:** The benchmark runner **DOES NOT start workers automatically**. You **MUST** start workers in separate terminals before running `just benchmark-all` or the benchmark will freeze. See [Worker Setup](./WORKER_SETUP.md) for details.
 
 ## Architecture
 

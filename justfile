@@ -96,18 +96,25 @@ worker-celery:
 # Benchmarking
 # ============================================================================
 
-# Run all benchmark scenarios
+# Run all benchmark scenarios (requires workers to be running!)
 benchmark-all:
+    @echo "⚠️  Make sure workers are running before starting benchmarks!"
+    @echo "   Run 'just worker-asynctasq' or 'just worker-celery' in separate terminals."
+    @echo ""
     @echo "🚀 Running all benchmark scenarios..."
     uv run python -m benchmarks.runner --all --runs 10
 
-# Run specific scenario (1-11)
+# Run specific scenario (1-11, requires workers to be running!)
 benchmark scenario:
+    @echo "⚠️  Make sure workers are running before starting benchmarks!"
+    @echo ""
     @echo "🔬 Running scenario {{scenario}}..."
     uv run python -m benchmarks.runner --scenario {{scenario}} --runs 10
 
-# Quick benchmark (1 run per scenario for testing)
+# Quick benchmark (1 run per scenario for testing, requires workers!)
 benchmark-quick:
+    @echo "⚠️  Make sure workers are running before starting benchmarks!"
+    @echo ""
     @echo "⚡ Running quick benchmark..."
     uv run python -m benchmarks.runner --all --runs 1
 

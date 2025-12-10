@@ -40,8 +40,6 @@ class BenchmarkConfig:
     worker_count: int = 10
     task_count: int = 20000
     runs: int = 10
-    warmup_tasks: int = 100  # Number of warmup tasks to stabilize system
-    warmup_seconds: int = 30
     timeout_seconds: int = 300
 
     # Worker configuration
@@ -317,7 +315,7 @@ class ResourceMonitor:
                 # CPU percent (per-core, so can exceed 100%)
                 cpu = self.process.cpu_percent(interval=None)
                 
-                # Only include non-zero CPU samples (skip warmup artifacts)
+                # Only include non-zero CPU samples (skip initial warmup)
                 if cpu > 0.0 or len(self.cpu_samples) > 0:
                     self.cpu_samples.append(cpu)
 

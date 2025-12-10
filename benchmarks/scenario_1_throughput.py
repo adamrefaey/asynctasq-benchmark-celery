@@ -37,31 +37,9 @@ async def run_asynctasq(config: BenchmarkConfig) -> BenchmarkResult:
     driver = DriverFactory.create_from_config(cfg)
     await driver.connect()
 
-    # Warmup phase: stabilize Redis connections, caches, and JIT
-    if config.warmup_tasks > 0:
-        warmup_ids = []
-        for _ in range(config.warmup_tasks):
-            task_id = await noop_task.dispatch()
-            warmup_ids.append(task_id)
-        
-        # Wait for warmup tasks to complete by polling queue depth
-        warmup_timeout = 30  # 30 seconds max for warmup
-        warmup_start = time.perf_counter()
-        
-        while (time.perf_counter() - warmup_start) < warmup_timeout:
-            try:
-                stats = await driver.get_global_stats()
-                pending = stats.get("pending", 0)
-                running = stats.get("running", 0)
-                # When both pending and running are 0, all warmup tasks are done
-                if pending == 0 and running == 0:
-                    break
-            except Exception:
-                pass  # Continue waiting if stats query fails
-            await asyncio.sleep(0.5)
-        
-        # Brief pause before actual benchmark to ensure clean start
-        await asyncio.sleep(1)
+    # NOTE: Warmup is handled by workers being pre-started.
+    # The benchmark assumes workers are already running and ready to process tasks.
+    # This avoids the benchmark script needing to manage worker lifecycle.
 
     task_timings: list[TaskTiming] = []
 
