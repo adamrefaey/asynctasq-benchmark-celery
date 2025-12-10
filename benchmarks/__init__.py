@@ -6,6 +6,7 @@ from benchmarks.common import (
     BenchmarkSummary,
     Driver,
     Framework,
+    ResourceMonitor,
     TaskTiming,
     Timer,
 )
@@ -16,6 +17,7 @@ __all__ = [
     "BenchmarkSummary",
     "Driver",
     "Framework",
+    "ResourceMonitor",
     "TaskTiming",
     "Timer",
 ]

@@ -7,12 +7,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import time
 from typing import Any
 
 from celery import Celery
 import requests
-import os
 
 # Initialize Celery app with explicit Redis database separation
 # IMPORTANT: Celery uses DB 1 (broker) and DB 2 (backend) to avoid conflicts with AsyncTasQ (DB 0)
