@@ -19,14 +19,20 @@ import httpx
 
 
 @task
-async def noop_task() -> None:
-    """Minimal task with no processing (baseline throughput test)."""
+def noop_task() -> None:
+    """Minimal task with no processing (baseline throughput test).
+
+    Note: @task decorator auto-detects sync function and uses SyncTask.
+    """
     pass
 
 
 @task
-async def simple_logging_task(message: str) -> str:
-    """Simple task that returns the message (minimal processing)."""
+def simple_logging_task(message: str) -> str:
+    """Simple task that returns the message (minimal processing).
+
+    Note: @task decorator auto-detects sync function and uses SyncTask.
+    """
     return f"Processed: {message}"
 
 
