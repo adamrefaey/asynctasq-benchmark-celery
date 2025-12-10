@@ -2,6 +2,18 @@
 
 Production-grade benchmarking infrastructure for comprehensive performance comparison between **AsyncTasQ** and **Celery** task queues over Redis.
 
+## ⚡ Recent Optimizations (Dec 2025)
+
+This benchmark suite now implements **cutting-edge async benchmarking practices** based on research of 7+ Python task queue libraries and academic microbenchmarking literature:
+
+- ✅ **Warmup phase** - Stabilizes JIT, Redis connections, system caches (eliminates 20-50% startup variance)
+- ✅ **Queue depth monitoring** - Real-time backlog tracking to detect consumer lag
+- ✅ **Statistical validation** - Coefficient of Variation (CV) checks for result stability
+- ✅ **Enhanced resource monitoring** - Improved CPU/memory sampling with artifact filtering
+- ✅ **End-to-end latency** - Proper enqueue→completion tracking (not just API response time)
+
+**See:** [BENCHMARK_OPTIMIZATIONS.md](BENCHMARK_OPTIMIZATIONS.md) for research findings | [OPTIMIZATION_QUICK_REF.md](OPTIMIZATION_QUICK_REF.md) for usage guide
+
 ## Overview
 
 This benchmarking suite implements focused performance testing between AsyncTasQ and Celery using Redis (the most common production deployment) with:
@@ -9,7 +21,7 @@ This benchmarking suite implements focused performance testing between AsyncTasQ
 - **11 comprehensive scenarios** covering throughput, latency, I/O-bound, CPU-bound, mixed workloads, serialization, scalability, ORM integration, event streaming, and FastAPI integration
 - **Redis backend** for both frameworks (most common and fair comparison)
 - **Multiple execution models**: AsyncTasQ BaseTask/SyncTask/ProcessTask vs Celery prefork/threads
-- **Statistical rigor**: 10+ runs per scenario, p95/p99 latency, t-tests for significance
+- **Statistical rigor**: 10+ runs per scenario, p95/p99 latency, stability validation (CV < 0.15)
 - **Full observability**: Prometheus metrics, Grafana dashboards, py-spy profiling, memory tracking
 - **Docker-based infrastructure**: Isolated Redis service for reproducible testing
 
