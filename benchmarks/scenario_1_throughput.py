@@ -27,14 +27,51 @@ async def run_asynctasq(config: BenchmarkConfig) -> BenchmarkResult:
     Returns:
         Benchmark results
     """
-    from asynctasq import Config
+    from asynctasq.config import Config
+    from asynctasq.core.driver_factory import DriverFactory
 
     from tasks.asynctasq_tasks import noop_task
 
     # Initialize driver to query task status
     cfg = Config()
-    driver = cfg.get_driver()
+    driver = DriverFactory.create_from_config(cfg)
     await driver.connect()
+
+    # Warmup phase: stabilize Redis connections, caches, and JIT
+    warmup_baseline_completed = 0
+    warmup_baseline_failed = 0
+    
+    if config.warmup_tasks > 0:
+        warmup_ids = []
+        for _ in range(config.warmup_tasks):
+            task_id = await noop_task.dispatch()
+            warmup_ids.append(task_id)
+        
+        # Wait for warmup tasks to complete
+        warmup_timeout = 30  # 30 seconds max for warmup
+        warmup_start = time.perf_counter()
+        warmup_completed = 0
+        
+        while (time.perf_counter() - warmup_start) < warmup_timeout:
+            try:
+                stats = await driver.get_global_stats()
+                warmup_completed = stats.get("completed", 0)
+                if warmup_completed >= config.warmup_tasks:
+                    break
+            except Exception:
+                pass  # Continue waiting if stats query fails
+            await asyncio.sleep(0.5)
+        
+        # Record baseline stats after warmup
+        try:
+            stats = await driver.get_global_stats()
+            warmup_baseline_completed = stats.get("completed", 0)
+            warmup_baseline_failed = stats.get("failed", 0)
+        except Exception:
+            pass
+        
+        # Brief pause before actual benchmark to ensure clean start
+        await asyncio.sleep(1)
 
     task_timings: list[TaskTiming] = []
 
@@ -68,14 +105,22 @@ async def run_asynctasq(config: BenchmarkConfig) -> BenchmarkResult:
 
     completed = 0
     failed = 0
+    queue_depth_samples: list[tuple[float, int]] = []
 
     while (time.perf_counter() - start) < timeout:
         # Get global stats from driver to check completion
         try:
             stats = await driver.get_global_stats()
-            # completed_count is the number of tasks marked as completed
-            completed = stats.get("completed", 0)
-            failed = stats.get("failed", 0)
+            # Subtract warmup baseline to get only benchmark task counts
+            total_completed = stats.get("completed", 0)
+            total_failed = stats.get("failed", 0)
+            completed = max(0, total_completed - warmup_baseline_completed)
+            failed = max(0, total_failed - warmup_baseline_failed)
+            
+            # Track queue depth (pending tasks)
+            pending = config.task_count - (completed + failed)
+            timestamp = time.perf_counter()
+            queue_depth_samples.append((timestamp, max(0, pending)))
 
             # Check if all tasks are done (completed + failed >= task_count)
             if (completed + failed) >= config.task_count:
@@ -121,6 +166,7 @@ async def run_asynctasq(config: BenchmarkConfig) -> BenchmarkResult:
         tasks_completed=completed,
         tasks_failed=failed,
         task_timings=task_timings,
+        queue_depth_samples=queue_depth_samples,
         memory_mb=avg_memory,
         cpu_percent=avg_cpu,
     )

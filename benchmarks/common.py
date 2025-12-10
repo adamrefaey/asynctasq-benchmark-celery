@@ -40,6 +40,7 @@ class BenchmarkConfig:
     worker_count: int = 10
     task_count: int = 20000
     runs: int = 10
+    warmup_tasks: int = 100  # Number of warmup tasks to stabilize system
     warmup_seconds: int = 30
     timeout_seconds: int = 300
 
@@ -104,6 +105,9 @@ class BenchmarkResult:
     # Resource metrics
     memory_mb: float = 0.0
     cpu_percent: float = 0.0
+
+    # Queue depth monitoring (timestamp, depth) pairs
+    queue_depth_samples: list[tuple[float, int]] = field(default_factory=list)
 
     # Extra metrics
     extra_metrics: dict[str, Any] = field(default_factory=dict)
@@ -213,6 +217,19 @@ class BenchmarkSummary:
         """CPU utilization statistics (%)."""
         return self._get_metric_stats("cpu_percent")
 
+    @property
+    def throughput_coefficient_of_variation(self) -> float:
+        """Coefficient of variation for throughput (lower is more stable).
+        
+        CV < 0.1 = excellent stability
+        CV 0.1-0.2 = good stability
+        CV > 0.2 = high variance, results may be unreliable
+        """
+        values = [r.throughput for r in self.results]
+        mean = statistics.mean(values)
+        stdev = statistics.stdev(values) if len(values) > 1 else 0.0
+        return (stdev / mean) if mean > 0 else 0.0
+
     def to_dict(self) -> dict[str, Any]:
         """Convert summary to dictionary for serialization."""
         return {
@@ -222,6 +239,7 @@ class BenchmarkSummary:
             "task_count": self.config.task_count,
             "runs": len(self.results),
             "throughput": self.throughput_stats,
+            "throughput_cv": self.throughput_coefficient_of_variation,
             "mean_latency_ms": self.mean_latency_stats,
             "p95_latency_ms": self.p95_latency_stats,
             "p99_latency_ms": self.p99_latency_stats,
@@ -298,7 +316,10 @@ class ResourceMonitor:
             try:
                 # CPU percent (per-core, so can exceed 100%)
                 cpu = self.process.cpu_percent(interval=None)
-                self.cpu_samples.append(cpu)
+                
+                # Only include non-zero CPU samples (skip warmup artifacts)
+                if cpu > 0.0 or len(self.cpu_samples) > 0:
+                    self.cpu_samples.append(cpu)
 
                 # Memory in MB
                 memory_info = self.process.memory_info()

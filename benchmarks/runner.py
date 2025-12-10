@@ -180,6 +180,17 @@ def _display_summary(scenario_id: str, scenario_name: str, summary: BenchmarkSum
     )
 
     console.print(table)
+    
+    # Display stability indicator
+    cv = summary.throughput_coefficient_of_variation
+    if cv < 0.1:
+        stability_msg = f"[green]✓ Excellent stability (CV: {cv:.3f})[/green]"
+    elif cv < 0.2:
+        stability_msg = f"[yellow]⚠ Good stability (CV: {cv:.3f})[/yellow]"
+    else:
+        stability_msg = f"[red]⚠ High variance - results may be unreliable (CV: {cv:.3f})[/red]"
+    
+    console.print(f"\n{stability_msg}")
 
 
 def save_results(summaries: list[BenchmarkSummary], output_dir: Path) -> None:
