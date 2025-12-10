@@ -34,11 +34,11 @@ async def run_asynctasq(config: BenchmarkConfig) -> BenchmarkResult:
         task_ids = []
         for i in range(config.task_count):
             enqueue_time = time.perf_counter()
-            task_instance = await fetch_user_http.dispatch(user_id=i % 1000)
-            task_ids.append(str(task_instance.task_id))
+            task_id = await fetch_user_http.dispatch(user_id=i % 1000)
+            task_ids.append(task_id)
             task_timings.append(
                 TaskTiming(
-                    task_id=str(task_instance.task_id),
+                    task_id=task_id,
                     enqueue_time=enqueue_time,
                 )
             )

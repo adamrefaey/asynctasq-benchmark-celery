@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from enum import Enum
+import os
 import statistics
 import time
 from typing import Any
+
+import psutil
 
 
 class Framework(str, Enum):
@@ -243,3 +247,75 @@ class Timer:
         """Stop timer and calculate elapsed time."""
         self.end_time = time.perf_counter()
         self.elapsed = self.end_time - self.start_time
+
+
+class ResourceMonitor:
+    """Monitor CPU and memory usage during benchmark execution.
+
+    Tracks resource usage at regular intervals and provides average metrics.
+    """
+
+    def __init__(self, interval_seconds: float = 0.5) -> None:
+        """Initialize resource monitor.
+
+        Args:
+            interval_seconds: How often to sample resource usage (default: 0.5s)
+        """
+        self.interval_seconds = interval_seconds
+        self.process = psutil.Process(os.getpid())
+        self.cpu_samples: list[float] = []
+        self.memory_samples: list[float] = []
+        self._monitoring = False
+        self._task: asyncio.Task[None] | None = None
+
+    async def start(self) -> None:
+        """Start monitoring resource usage in background."""
+        self._monitoring = True
+        self._task = asyncio.create_task(self._monitor_loop())
+
+    async def stop(self) -> tuple[float, float]:
+        """Stop monitoring and return average metrics.
+
+        Returns:
+            Tuple of (average_cpu_percent, average_memory_mb)
+        """
+        self._monitoring = False
+        if self._task:
+            await self._task
+
+        avg_cpu = statistics.mean(self.cpu_samples) if self.cpu_samples else 0.0
+        avg_memory = statistics.mean(self.memory_samples) if self.memory_samples else 0.0
+
+        return avg_cpu, avg_memory
+
+    async def _monitor_loop(self) -> None:
+        """Background loop to sample resource usage."""
+        # Initial sample to "warm up" cpu_percent (first call returns 0.0)
+        self.process.cpu_percent(interval=None)
+        await asyncio.sleep(self.interval_seconds)
+
+        while self._monitoring:
+            try:
+                # CPU percent (per-core, so can exceed 100%)
+                cpu = self.process.cpu_percent(interval=None)
+                self.cpu_samples.append(cpu)
+
+                # Memory in MB
+                memory_info = self.process.memory_info()
+                memory_mb = memory_info.rss / 1024 / 1024
+                self.memory_samples.append(memory_mb)
+
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                # Process may have terminated
+                break
+
+            await asyncio.sleep(self.interval_seconds)
+
+    async def __aenter__(self) -> ResourceMonitor:
+        """Async context manager entry."""
+        await self.start()
+        return self
+
+    async def __aexit__(self, *args: Any) -> None:
+        """Async context manager exit."""
+        await self.stop()
