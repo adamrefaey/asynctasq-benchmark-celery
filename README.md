@@ -1,203 +1,320 @@
 # AsyncTasQ vs Celery Benchmarking Suite
 
-Production-grade benchmarking infrastructure for comprehensive performance comparison between **AsyncTasQ** and **Celery** task queues over Redis.
-
-## ⚡ Recent Optimizations (Dec 2025)
-
-This benchmark suite implements **cutting-edge async benchmarking practices** based on research of 7+ Python task queue libraries and academic microbenchmarking literature:
-
-- ✅ **Pre-warmed workers** - Workers must be running before benchmarks start (eliminates startup variance)
-- ✅ **Queue depth monitoring** - Real-time backlog tracking to detect consumer lag
-- ✅ **Statistical validation** - Coefficient of Variation (CV) checks for result stability
-- ✅ **Enhanced resource monitoring** - Improved CPU/memory sampling with artifact filtering
-- ✅ **End-to-end latency** - Proper enqueue→completion tracking (not just API response time)
-
-**See:** [BENCHMARK_OPTIMIZATIONS.md](BENCHMARK_OPTIMIZATIONS.md) for research findings | [OPTIMIZATION_QUICK_REF.md](OPTIMIZATION_QUICK_REF.md) for usage guide
+Production-grade benchmarking infrastructure for comprehensive performance comparison between **AsyncTasQ** and **Celery** task queues.
 
 ## Overview
 
-This benchmarking suite implements focused performance testing between AsyncTasQ and Celery using Redis (the most common production deployment) with:
+This benchmarking suite provides rigorous performance testing between AsyncTasQ and Celery using Redis as the common backend.
 
-- **11 comprehensive scenarios** covering throughput, latency, I/O-bound, CPU-bound, mixed workloads, serialization, scalability, ORM integration, event streaming, and FastAPI integration
-- **Redis backend** for both frameworks (most common and fair comparison)
-- **Multiple execution models**: AsyncTasQ BaseTask/SyncTask/ProcessTask vs Celery prefork/threads
-- **Statistical rigor**: 10+ runs per scenario, p95/p99 latency, stability validation (CV < 0.15)
-- **Full observability**: Prometheus metrics, Grafana dashboards, py-spy profiling, memory tracking
-- **Docker-based infrastructure**: Isolated Redis service for reproducible testing
+### Key Features
 
-> **Note**: For multi-driver benchmarks of AsyncTasQ (PostgreSQL, MySQL, RabbitMQ, AWS SQS), see the main asynctasq repository.
+**Test Coverage**
+- 11 comprehensive scenarios covering throughput, latency, I/O-bound, CPU-bound, mixed workloads, serialization, scalability, ORM integration, event streaming, and FastAPI integration
+- Multiple execution models: AsyncTasQ (BaseTask/SyncTask/ProcessTask) vs Celery (prefork/threads)
+
+**Statistical Rigor**
+- Pre-warmed workers (eliminates startup variance)
+- Queue depth monitoring (detects consumer lag)
+- 10+ runs per scenario with stability validation (CV < 0.15)
+- p50/p95/p99 latency percentiles
+- End-to-end latency tracking (enqueue → completion)
+
+**Observability**
+- Prometheus metrics with custom exporters
+- Grafana dashboards for real-time monitoring
+- py-spy flamegraphs for profiling
+- Memory and CPU tracking
+
+**Infrastructure**
+- Docker-based services for reproducibility
+- Isolated Redis databases (AsyncTasQ: DB 0, Celery: DB 1 & 2)
+- Optional Mock API server for I/O testing
+
+> **Note**: This suite focuses on Redis (the most common production deployment). For multi-driver AsyncTasQ benchmarks (PostgreSQL, MySQL, RabbitMQ, AWS SQS), see the main asynctasq repository.
+
+### Recent Optimizations (Dec 2025)
+
+Based on research of 7+ Python task queue libraries and academic microbenchmarking literature:
+
+- Pre-warmed workers eliminate cold-start bias
+- Queue depth monitoring detects backlog and consumer lag
+- Coefficient of Variation (CV) checks ensure result stability
+- Enhanced resource monitoring with artifact filtering
+- Proper end-to-end latency measurement (not just API response time)
 
 ## Quick Start
 
+### Prerequisites
+
+- Python 3.14+
+- Docker 27.x with Compose v2
+- 8GB+ RAM, 8+ CPU cores recommended
+- 5GB+ disk space
+
+### Running Benchmarks
+
+**Step 1: Install dependencies**
 ```bash
-# 1. Install dependencies
 just init
+```
 
-# 2. Start Redis infrastructure
-just docker-up              # For Scenario 1 only (minimal tasks)
-# OR
-just docker-up-mock         # For Scenarios 2+ (includes Mock API on port 8080)
+**Step 2: Start infrastructure**
+```bash
+# For Scenario 1 only (basic throughput)
+just docker-up
 
-# 3. Verify database separation (RECOMMENDED)
-just verify-separation      # Checks that AsyncTasQ uses DB 0, Celery uses DB 1 & 2
+# For Scenarios 2-11 (I/O-bound, mixed workloads)
+just docker-up-mock  # Includes Mock API on port 8080
+```
 
-# 4. ⚠️ START WORKERS FIRST (REQUIRED!)
-#    Open separate terminal windows for each worker:
+**Step 3: Verify database separation** (recommended)
+```bash
+just verify-separation  # Checks AsyncTasQ (DB 0) vs Celery (DB 1 & 2)
+```
 
+**Step 4: Start workers** (separate terminals)
+
+> **CRITICAL:** Workers must be started BEFORE running benchmarks. The benchmark runner does not auto-start workers.
+
+```bash
 # Terminal 1: AsyncTasQ worker
 just worker-asynctasq
 
-# Terminal 2: Celery worker (if testing Celery scenarios)
+# Terminal 2: Celery worker
 just worker-celery
-
-# 5. Run benchmarks (in Terminal 3, AFTER workers are running)
-just benchmark-all  # All scenarios
-just benchmark 1    # Single scenario
-
-# 6. View results
-just report  # Generate HTML report with charts
-
-# 7. Stop everything
-# Ctrl+C in worker terminals, then:
-just docker-down
 ```
 
-**⚠️ CRITICAL:** 
-- The benchmark runner **DOES NOT start workers automatically**. You **MUST** start workers in separate terminals before running `just benchmark-all` or the benchmark will freeze. See [Worker Setup](./WORKER_SETUP.md) for details.
-- **Database Isolation**: AsyncTasQ uses Redis DB 0, Celery uses DB 1 & 2. Run `just verify-separation` to confirm proper configuration. See [REDIS_DATABASE_SEPARATION.md](./REDIS_DATABASE_SEPARATION.md) for details.
-- **Scenario 2 (I/O-bound)** requires the Mock API server. Use `just docker-up-mock` instead of `just docker-up`.
+**Step 5: Run benchmarks** (new terminal)
+```bash
+just benchmark-all   # All scenarios
+just benchmark 1     # Single scenario
+just benchmark-quick # Quick test (1 run per scenario)
+```
+
+**Step 6: Generate reports**
+```bash
+just report  # HTML report with charts and analysis
+```
+
+**Step 7: Cleanup**
+```bash
+# Stop workers (Ctrl+C in worker terminals)
+just docker-down
+just docker-clean  # Remove volumes and reset state
+```
+
+### Important Notes
+
+**Database Isolation**
+- AsyncTasQ: Redis DB 0
+- Celery: Redis DB 1 (broker) + DB 2 (results)
+- This prevents workers from processing each other's tasks
+
+**Worker Requirements**
+- Workers MUST be running before benchmarks start
+- Benchmark runner will freeze if workers are not available
+
+**Mock API Server**
+- Required for Scenarios 2, 4, 7 (I/O-bound workloads)
+- Started with `just docker-up-mock`
+- Listens on port 8080
 
 ## Architecture
 
 ```
 asynctasq-benchmark-celery/
 ├── benchmarks/           # Benchmark scenarios (scenario_*.py)
-├── tasks/                # Task definitions (asynctasq_tasks.py, celery_tasks.py)
-├── infrastructure/       # Docker compose, monitoring configs
-├── analysis/             # Data processing and visualization
-├── results/              # CSV/JSON outputs, profiling data
-└── reports/              # Generated HTML/PDF reports
+│   ├── common.py         # Shared utilities (BenchmarkResult, timing)
+│   ├── runner.py         # Main benchmark orchestrator
+│   └── scenario_*.py     # Individual test scenarios
+│
+├── tasks/                # Task definitions
+│   ├── asynctasq_tasks.py  # AsyncTasQ BaseTask/SyncTask/ProcessTask
+│   └── celery_tasks.py     # Celery tasks (prefork/threads)
+│
+├── infrastructure/       # Docker infrastructure
+│   ├── docker-compose.yml  # Redis, Prometheus, Grafana
+│   ├── mock_api.py         # FastAPI mock server for I/O tests
+│   ├── prometheus/         # Scraping configs
+│   └── grafana/            # Dashboard JSONs
+│
+├── analysis/             # Post-benchmark analysis
+│   ├── analyzer.py         # Statistical analysis (t-tests, CV)
+│   ├── visualizer.py       # Chart generation (matplotlib)
+│   └── report_generator.py # HTML report builder
+│
+├── results/              # Benchmark outputs
+│   ├── *.csv              # Raw timing data
+│   ├── *_stats.json       # Statistical summaries
+│   └── *_profile.svg      # py-spy flamegraphs
+│
+└── reports/              # Generated reports
+    └── summary_report.html
 ```
 
-## Scenarios
+## Benchmark Scenarios
 
-| Scenario | Description | Key Metrics | Requirements |
-|----------|-------------|-------------|--------------|
-| 1 | Basic Throughput (20k minimal tasks) | tasks/sec, enqueue rate | Redis only |
-| 2 | I/O-Bound (HTTP requests with mock server) | async scaling efficiency | **Mock API required** (`just docker-up-mock`) |
-| 3 | CPU-Bound (ProcessTask vs prefork) | GIL impact, process parallelism | Redis only |
-| 4 | Mixed Workload (60% I/O, 30% light CPU, 10% heavy CPU) | realistic performance | **Mock API required** |
-| 5 | Serialization (msgpack vs JSON/pickle, ORM models) | payload size, speed | Redis only |
-| 6 | Scalability (1k → 100k task ramp-up) | saturation point, queue depth | Redis only |
-| 7 | Real-World (e-commerce order pipeline) | end-to-end latency, retry behavior | **Mock API required** |
-| 8 | Cold Start (worker initialization time) | startup latency, first task | Redis only |
-| 9 | Multi-Queue (priority queues, routing) | queue management | Redis only |
-| 10 | Event Streaming (Redis Pub/Sub overhead) | event delivery latency | Redis only |
-| 11 | FastAPI Integration (lifespan overhead) | HTTP dispatch performance | Redis only |
+### Overview
 
-## Requirements
+11 planned scenarios testing different performance characteristics (currently 3 implemented):
 
-- **Python**: 3.12+ (both AsyncTasQ and Celery)
-- **Docker**: 27.x with Compose v2
-- **Memory**: 8GB+ RAM recommended
-- **CPU**: 8+ cores for optimal parallelism testing
-- **Disk**: 5GB+ for logs, profiling data, results
+| # | Scenario | Description | Key Metrics | Requirements |
+|---|----------|-------------|-------------|------------|
+| 1 | Basic Throughput | 20k minimal tasks | tasks/sec, enqueue rate | Redis only |
+| 2 | I/O-Bound | HTTP requests with mock server | async scaling efficiency | Mock API required |
+| 3 | CPU-Bound | ProcessTask vs prefork | GIL impact, parallelism | Redis only |
+| 4 | Mixed Workload | 60% I/O, 30% light CPU, 10% heavy | realistic performance | Mock API required |
+| 5 | Serialization | msgpack vs JSON/pickle, ORM | payload size, speed | Redis only |
+| 6 | Scalability | 1k → 100k task ramp | saturation, queue depth | Redis only |
+| 7 | Real-World | E-commerce order pipeline | end-to-end latency, retries | Mock API required |
+| 8 | Cold Start | Worker initialization | startup time, first task | Redis only |
+| 9 | Multi-Queue | Priority queues, routing | queue management | Redis only |
+| 10 | Event Streaming | Redis Pub/Sub overhead | event delivery latency | Redis only |
+| 11 | FastAPI Integration | Lifespan integration | HTTP dispatch | Redis only |
 
-## Environment Variables
+### Execution Models Tested
 
+**AsyncTasQ**
+- `BaseTask` - Async I/O operations (coroutines)
+- `SyncTask` - Blocking I/O in thread pool
+- `ProcessTask` - CPU-bound work in process pool
+
+**Celery**
+- `prefork` - Process pool (default, CPU-bound)
+- `threads` - Thread pool (I/O-bound)
+- `solo` - Single process (cold start testing)
+
+## Configuration
+
+### Environment Variables
+
+**AsyncTasQ** (Redis DB 0)
 ```bash
-# AsyncTasQ Configuration (uses Redis DB 0)
 ASYNCTASQ_DRIVER=redis
 ASYNCTASQ_REDIS_URL=redis://localhost:6379/0
+```
 
-# Celery Configuration (uses Redis DB 1 for broker, DB 2 for backend)
-# IMPORTANT: Separate databases ensure workers don't process each other's tasks
-CELERY_BROKER_URL=redis://localhost:6379/1
-CELERY_RESULT_BACKEND=redis://localhost:6379/2
+**Celery** (Redis DB 1 & 2)
+```bash
+CELERY_BROKER_URL=redis://localhost:6379/1      # Task queue
+CELERY_RESULT_BACKEND=redis://localhost:6379/2  # Results storage
+```
 
-# Benchmarking Configuration
-BENCHMARK_RUNS=10  # Number of repetitions per scenario
-BENCHMARK_WORKERS=10  # Worker count (overridden per scenario)
-BENCHMARK_WARMUP_SECONDS=30  # Warm-up period before metrics collection
-BENCHMARK_OUTPUT_DIR=./results  # Output directory for CSV/JSON
+**Benchmarking**
+```bash
+BENCHMARK_RUNS=10                 # Repetitions per scenario
+BENCHMARK_WORKERS=10              # Worker count (per-scenario override)
+BENCHMARK_WARMUP_SECONDS=30       # Warm-up before metrics
+BENCHMARK_OUTPUT_DIR=./results    # Output directory
+```
 
-# Monitoring (Optional)
+**Monitoring** (optional)
+```bash
 PROMETHEUS_PORT=9090
 GRAFANA_PORT=3000
 ```
 
-**Database Isolation:**
-- **AsyncTasQ**: Uses Redis database **0** exclusively
-- **Celery**: Uses Redis database **1** for broker and database **2** for result backend
-- This separation ensures workers running in parallel don't interfere with each other's tasks
+### Database Isolation
 
-## Monitoring
+Separate Redis databases prevent cross-contamination:
+- **AsyncTasQ:** DB 0 (tasks only)
+- **Celery:** DB 1 (broker) + DB 2 (results)
+
+Verify with `just verify-separation` before running benchmarks.
+
+## Monitoring & Observability
 
 ### Grafana Dashboards
 
-Access at `http://localhost:3000` (default: admin/admin):
+Access: `http://localhost:3000` (admin/admin)
 
-- **AsyncTasQ Dashboard**: Throughput, latency, queue depth, worker health, event stream
-- **Celery Dashboard**: Task rate, prefork/thread metrics, broker connections
-- **System Metrics**: CPU, memory, network, disk I/O per node
-- **Comparison View**: Side-by-side AsyncTasQ vs Celery performance
+**Available Dashboards:**
+- **AsyncTasQ Performance** - Throughput, latency histograms, queue depth, worker health, event stream overhead
+- **Celery Performance** - Task rate, prefork/thread pool metrics, broker connections, result backend stats
+- **System Resources** - CPU, memory, network, disk I/O (per-container breakdown)
+- **Comparison View** - Side-by-side AsyncTasQ vs Celery metrics with delta calculations
 
 ### Prometheus Metrics
 
-Access at `http://localhost:9090`:
+Access: `http://localhost:9090`
 
-- `asynctasq_tasks_total` - Task completion counter
-- `asynctasq_task_duration_seconds` - Task execution time histogram
-- `asynctasq_queue_depth` - Current queue size
-- `asynctasq_event_emission_duration_seconds` - Event overhead
-- `celery_tasks_total` - Celery task counter
-- `celery_task_duration_seconds` - Celery task duration
+**AsyncTasQ Metrics:**
+- `asynctasq_tasks_total` - Task completion counter (labels: status, queue)
+- `asynctasq_task_duration_seconds` - Execution time histogram (p50/p95/p99)
+- `asynctasq_queue_depth` - Current backlog size
+- `asynctasq_event_emission_duration_seconds` - Event system overhead
 
-## Key Commands
+**Celery Metrics:**
+- `celery_tasks_total` - Task counter (labels: state, worker)
+- `celery_task_duration_seconds` - Task duration histogram
+- `celery_worker_pool_*` - Pool utilization metrics
+
+## Command Reference
+
+### Setup & Infrastructure
 
 ```bash
-# Initialization
-just init                 # Install all dependencies (Python + Docker)
-
-# Infrastructure
+just init                     # Install all dependencies
 just docker-up                # Start Redis only
 just docker-up-monitoring     # Start Redis + Prometheus/Grafana
-just docker-up-mock           # Start Redis + Mock API server
+just docker-up-mock           # Start Redis + Mock API (port 8080)
 just docker-down              # Stop all services
-just docker-logs              # Tail service logs
 just docker-clean             # Remove volumes and reset state
-just check-health             # Verify Redis is running
-
-# Benchmarking
-just benchmark-all        # Run all scenarios
-just benchmark scenario1  # Run specific scenario
-just benchmark-quick      # Quick test (1 run per scenario)
-just benchmark-stress     # 24-hour soak test
-
-# Profiling
-just profile-asynctasq    # py-spy profiling for AsyncTasQ worker
-just profile-celery       # py-spy profiling for Celery worker
-just profile-memory       # memory_profiler analysis
-
-# Analysis
-just analyze              # Statistical analysis (mean, p95, p99, t-tests)
-just visualize            # Generate charts (matplotlib/seaborn)
-just report               # Generate full HTML report with all metrics
-
-# Redis Utilities
-just reset-redis          # Flush all Redis data
-just redis-info           # Show Redis statistics
-just redis-monitor        # Monitor Redis commands in real-time
+just check-health             # Verify services are running
+just verify-separation        # Check database isolation
 ```
 
-## Interpreting Results
+### Workers
 
-### Expected Performance (Targets)
+```bash
+just worker-asynctasq         # Start AsyncTasQ worker
+just worker-celery            # Start Celery worker
+```
+
+### Benchmarking
+
+```bash
+just benchmark-all            # Run all scenarios (10 runs each)
+just benchmark 1              # Run specific scenario
+just benchmark-quick          # Quick test (1 run per scenario)
+just benchmark-stress         # 24-hour soak test
+```
+
+### Profiling
+
+```bash
+just profile-asynctasq        # py-spy flamegraph for AsyncTasQ
+just profile-celery           # py-spy flamegraph for Celery
+just profile-memory           # memory_profiler analysis
+```
+
+### Analysis & Reporting
+
+```bash
+just analyze                  # Statistical analysis (t-tests, CV)
+just visualize                # Generate charts (matplotlib/seaborn)
+just report                   # Generate full HTML report
+```
+
+### Redis Utilities
+
+```bash
+just reset-redis              # Flush all databases
+just redis-info               # Show Redis stats
+just redis-monitor            # Monitor commands in real-time
+just docker-logs              # Tail service logs
+```
+
+## Results & Analysis
+
+### Expected Performance
+
+Performance targets based on production workloads:
 
 | Metric | AsyncTasQ Target | Celery Baseline |
 |--------|------------------|-----------------|
-| Throughput (I/O) | >5000 tasks/sec | ~1500 tasks/sec |
-| Throughput (CPU) | Match Celery prefork (ProcessTask) | Baseline |
+| **I/O Throughput** | >5,000 tasks/sec | ~1,500 tasks/sec |
+| **CPU Throughput** | Match Celery prefork | Baseline (prefork) |
 | Mean Latency | <50ms | ~200ms |
 | P99 Latency | <300ms | ~1000ms |
 | Serialization (ORM) | 90% payload reduction | Manual (N/A) |
@@ -210,24 +327,28 @@ just redis-monitor        # Monitor Redis commands in real-time
 - Report includes **effect size** (Cohen's d) for practical significance
 - Confidence intervals: 95% for all metrics
 
-### Anti-Patterns to Validate
+### Anti-Patterns Documentation
 
-The benchmark suite explicitly tests these anti-patterns to document them:
+The suite explicitly tests these known anti-patterns for educational purposes:
 
-1. **AsyncTasQ BaseTask with CPU-bound work** (blocks event loop) - should show 5x+ slowdown
-2. **Celery threads with heavy CPU** (GIL contention) - should show ~1.5x slower than prefork
-3. **Passing ORM models to Celery without manual serialization** - causes stale data issues (documented)
+1. **AsyncTasQ BaseTask + CPU-bound work** → Blocks event loop (5x+ slowdown expected)
+2. **Celery threads + heavy CPU** → GIL contention (~1.5x slower than prefork)
+3. **Celery + ORM models without serialization** → Stale data issues (documented, not benchmarked)
 
-## Output Structure
+## Output Files
+
+### Directory Structure
 
 ```
 results/
 ├── scenario_1_throughput.csv           # Raw timing data
 ├── scenario_1_throughput_stats.json    # Statistical summary
 ├── scenario_1_throughput_profile.svg   # py-spy flamegraph
-├── scenario_2_io_bound.csv
+├── scenario_2_io_bound.csv             # I/O benchmark data
 ├── ...
 └── summary_report.html                 # Full report with charts
+```
+
 ### CSV Format
 
 ```csv
@@ -235,47 +356,108 @@ framework,run,task_count,total_time,throughput,mean_latency,p50,p95,p99,memory_m
 asynctasq,1,20000,3.45,5797.1,12.3,10.2,45.6,89.3,87.4,72.3
 asynctasq,2,20000,3.52,5681.8,13.1,10.8,47.2,91.1,88.1,71.8
 celery,1,20000,12.34,1620.7,123.4,98.2,456.7,892.1,142.3,68.9
-...
 ```
+
+### JSON Stats Format
+
+```json
+{
+  "scenario": "throughput",
+  "asynctasq": {
+    "mean_throughput": 5739.4,
+    "std_throughput": 58.3,
+    "p95_latency": 46.4,
+    "cv": 0.01
+  },
+  "celery": { ... },
+  "t_test": {
+    "statistic": 45.2,
+    "p_value": 0.0001,
+    "significant": true
+  }
+}
+```
+
+## Reproducibility
+
+The suite ensures consistent results across runs:
+
+- **Pinned Docker images** - Redis 8.4, Prometheus 3.1, Grafana 11.4
+- **Locked Python deps** - `uv.lock` for exact versions
+- **Fixed random seeds** - Reproducible test ordering
+- **Warm-up periods** - Eliminate cold-start bias
+- **Multiple runs** - Minimum 10 per scenario for variance analysis
+- **CV validation** - Coefficient of Variation < 0.15 for result stability
 
 ## Why Redis Only?
 
-## Reproducibility
+This suite focuses on Redis because:
 
-- **Docker images pinned** to specific versions (Redis 8.4, Prometheus 3.1, Grafana 11.4)
-- **Python dependencies locked** with `uv.lock` for exact versions
-- **Random seed fixed** for reproducible test ordering
-- **Warm-up period** to eliminate cold-start bias
-- **Multiple runs** to account for variance (min 10 per scenario)
-For multi-driver AsyncTasQ benchmarks (PostgreSQL, MySQL, RabbitMQ, SQS), see the main asynctasq repository.ery,redis,1,20000,12.34,1620.7,123.4,98.2,456.7,892.1,142.3,68.9
-...
-```
+1. **Most common deployment** - 80%+ of Celery production uses Redis
+2. **Fair comparison** - Both frameworks support Redis natively
+3. **Reduced complexity** - Easier to isolate performance differences
+4. **Focus on design** - Tests async-first vs process pool architecture
 
-## Reproducibility
+For multi-driver AsyncTasQ benchmarks (PostgreSQL, MySQL, RabbitMQ, AWS SQS), see the main asynctasq repository.
 
-- **Docker images pinned** to specific versions (Redis 7.4, PostgreSQL 17, etc.)
-- **Python dependencies locked** with `uv.lock` for exact versions
-- **Random seed fixed** for reproducible test ordering
-- **Warm-up period** to eliminate cold-start bias
-- **Multiple runs** to account for variance (min 10 per scenario)
+## Development
 
-## Contributing
-
-To add new benchmark scenarios:
+### Adding New Scenarios
 
 1. Create `benchmarks/scenario_N_description.py`
 2. Implement `run_benchmark()` function returning `BenchmarkResult`
 3. Add scenario to `justfile` commands
 4. Update `analysis/report_generator.py` for new metrics
-5. Run `just ci` to validate (linting, type checking, tests)
+5. Run `just ci` to validate (format, lint, typecheck, tests)
 
-## License
+### Code Quality
 
-MIT License (matches parent AsyncTasQ project)
+```bash
+just ci        # Full validation (MUST pass before committing)
+just check     # Quick check (format + lint + typecheck)
+just test      # Run all tests
+```
+
+### Project Standards
+
+- **Type safety:** Full type hints (pyright strict mode)
+- **Code style:** Ruff formatter + linter (line-length: 100)
+- **Testing:** pytest with >90% coverage target
+- **Async-first:** All I/O uses asyncio (no blocking calls)
+
+## Troubleshooting
+
+### Workers Not Starting
+- Check Docker services: `just check-health`
+- Verify Redis databases: `just verify-separation`
+- Check logs: `just docker-logs`
+
+### Benchmark Hangs
+- Ensure workers are running BEFORE benchmarks
+- Check queue depth: `just redis-monitor`
+- Verify database isolation
+
+### Inconsistent Results
+- Increase warm-up period: `BENCHMARK_WARMUP_SECONDS=60`
+- Check CV values in stats.json (should be < 0.15)
+- Reduce system load (close other applications)
+
+### Mock API Not Responding
+- Use `just docker-up-mock` instead of `just docker-up`
+- Verify port 8080: `curl http://localhost:8080/health`
+- Check logs: `docker logs mock-api`
 
 ## References
 
-- [AsyncTasQ Benchmarking Plan](../asynctasq/docs/benchmarking-plan.md)
-- [Celery Best Practices](https://docs.celeryq.dev/en/stable/userguide/optimizing.html)
+**Documentation**
+- [AsyncTasQ Documentation](../asynctasq/docs/)
+- [Infrastructure README](./infrastructure/README.md)
+
+**External Resources**
+- [Celery Performance Best Practices](https://docs.celeryq.dev/en/stable/userguide/optimizing.html)
 - [Python Queue Benchmark Research](https://github.com/GoodManWEN/python_queue_benchmark)
 - [Async vs Threading Performance](https://www.cloudcity.io/blog/2019/02/27/things-i-wish-they-told-me-about-multiprocessing-in-python/)
+
+## License
+
+MIT License - Same license as parent AsyncTasQ project
