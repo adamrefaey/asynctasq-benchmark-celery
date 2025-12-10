@@ -12,12 +12,14 @@ from typing import Any
 
 from celery import Celery
 import requests
+import os
 
-# Initialize Celery app
+# Initialize Celery app with explicit Redis database separation
+# IMPORTANT: Celery uses DB 1 (broker) and DB 2 (backend) to avoid conflicts with AsyncTasQ (DB 0)
 app = Celery(
     "celery_tasks",
-    broker="redis://localhost:6379/1",
-    backend="redis://localhost:6379/2",
+    broker=os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/1"),
+    backend=os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/2"),
 )
 
 # Configure Celery

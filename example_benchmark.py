@@ -4,6 +4,7 @@ This script demonstrates how to run a custom benchmark scenario programmatically
 """
 
 import asyncio
+import os
 from pathlib import Path
 
 from benchmarks.common import BenchmarkConfig, BenchmarkSummary, Driver, Framework
@@ -12,6 +13,12 @@ from benchmarks.scenario_1_throughput import run_benchmark
 
 async def main() -> None:
     """Run example benchmark."""
+    
+    # CRITICAL: Ensure AsyncTasQ uses Redis DB 0 (not Celery's DB 1/2)
+    from asynctasq.config import set_global_config
+    redis_url = os.getenv("ASYNCTASQ_REDIS_URL", "redis://localhost:6379/0")
+    set_global_config(driver="redis", redis_url=redis_url)
+    print(f"AsyncTasQ configured: {redis_url}\n")
 
     # Configure AsyncTasQ benchmark
     asynctasq_config = BenchmarkConfig(

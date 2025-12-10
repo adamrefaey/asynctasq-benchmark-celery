@@ -32,8 +32,8 @@ async def run_asynctasq(config: BenchmarkConfig) -> BenchmarkResult:
 
     from tasks.asynctasq_tasks import noop_task
 
-    # Initialize driver to query task status
-    cfg = Config()
+    # Initialize driver to query task status - explicitly use Redis DB 0
+    cfg = Config(redis_url="redis://localhost:6379/0")
     driver = DriverFactory.create_from_config(cfg)
     await driver.connect()
 

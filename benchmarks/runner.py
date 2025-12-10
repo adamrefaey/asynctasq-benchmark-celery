@@ -1,6 +1,11 @@
 """Main benchmark runner.
 
 Orchestrates all benchmark scenarios and generates reports.
+
+IMPORTANT: Database Isolation
+- AsyncTasQ uses Redis DB 0 (set via ASYNCTASQ_REDIS_URL)
+- Celery uses Redis DB 1 for broker and DB 2 for backend
+- This separation ensures workers running in parallel don't interfere
 """
 
 from __future__ import annotations
@@ -8,6 +13,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Any
@@ -19,6 +25,23 @@ from rich.table import Table
 from benchmarks.common import BenchmarkConfig, BenchmarkSummary, Driver, Framework
 
 console = Console()
+
+# CRITICAL: Set AsyncTasQ global config to use Redis DB 0 for database isolation
+# This ensures AsyncTasQ tasks never interfere with Celery (which uses DB 1 & 2)
+def _ensure_asynctasq_config() -> None:
+    """Ensure AsyncTasQ is configured to use Redis DB 0."""
+    from asynctasq.config import set_global_config
+    
+    redis_url = os.getenv("ASYNCTASQ_REDIS_URL", "redis://localhost:6379/0")
+    # Ensure DB 0 is explicitly set in the URL
+    if "/0" not in redis_url and redis_url.endswith("6379"):
+        redis_url = f"{redis_url}/0"
+    
+    set_global_config(
+        driver="redis",
+        redis_url=redis_url,
+    )
+    console.print(f"[dim]AsyncTasQ configured: {redis_url}[/dim]")
 
 
 # Import all scenarios
@@ -235,6 +258,9 @@ def save_results(summaries: list[BenchmarkSummary], output_dir: Path) -> None:
 
 async def main() -> int:
     """Main entry point."""
+    # Initialize AsyncTasQ config before running any benchmarks
+    _ensure_asynctasq_config()
+    
     parser = argparse.ArgumentParser(description="AsyncTasQ vs Celery Benchmark Suite")
     parser.add_argument(
         "--scenario",

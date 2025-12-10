@@ -38,7 +38,10 @@ just docker-up              # For Scenario 1 only (minimal tasks)
 # OR
 just docker-up-mock         # For Scenarios 2+ (includes Mock API on port 8080)
 
-# 3. ⚠️ START WORKERS FIRST (REQUIRED!)
+# 3. Verify database separation (RECOMMENDED)
+just verify-separation      # Checks that AsyncTasQ uses DB 0, Celery uses DB 1 & 2
+
+# 4. ⚠️ START WORKERS FIRST (REQUIRED!)
 #    Open separate terminal windows for each worker:
 
 # Terminal 1: AsyncTasQ worker
@@ -47,20 +50,21 @@ just worker-asynctasq
 # Terminal 2: Celery worker (if testing Celery scenarios)
 just worker-celery
 
-# 4. Run benchmarks (in Terminal 3, AFTER workers are running)
+# 5. Run benchmarks (in Terminal 3, AFTER workers are running)
 just benchmark-all  # All scenarios
 just benchmark 1    # Single scenario
 
-# 5. View results
+# 6. View results
 just report  # Generate HTML report with charts
 
-# 6. Stop everything
+# 7. Stop everything
 # Ctrl+C in worker terminals, then:
 just docker-down
 ```
 
 **⚠️ CRITICAL:** 
 - The benchmark runner **DOES NOT start workers automatically**. You **MUST** start workers in separate terminals before running `just benchmark-all` or the benchmark will freeze. See [Worker Setup](./WORKER_SETUP.md) for details.
+- **Database Isolation**: AsyncTasQ uses Redis DB 0, Celery uses DB 1 & 2. Run `just verify-separation` to confirm proper configuration. See [REDIS_DATABASE_SEPARATION.md](./REDIS_DATABASE_SEPARATION.md) for details.
 - **Scenario 2 (I/O-bound)** requires the Mock API server. Use `just docker-up-mock` instead of `just docker-up`.
 
 ## Architecture
@@ -102,11 +106,12 @@ asynctasq-benchmark-celery/
 ## Environment Variables
 
 ```bash
-# AsyncTasQ Configuration
+# AsyncTasQ Configuration (uses Redis DB 0)
 ASYNCTASQ_DRIVER=redis
 ASYNCTASQ_REDIS_URL=redis://localhost:6379/0
 
-# Celery Configuration
+# Celery Configuration (uses Redis DB 1 for broker, DB 2 for backend)
+# IMPORTANT: Separate databases ensure workers don't process each other's tasks
 CELERY_BROKER_URL=redis://localhost:6379/1
 CELERY_RESULT_BACKEND=redis://localhost:6379/2
 
@@ -120,6 +125,11 @@ BENCHMARK_OUTPUT_DIR=./results  # Output directory for CSV/JSON
 PROMETHEUS_PORT=9090
 GRAFANA_PORT=3000
 ```
+
+**Database Isolation:**
+- **AsyncTasQ**: Uses Redis database **0** exclusively
+- **Celery**: Uses Redis database **1** for broker and database **2** for result backend
+- This separation ensures workers running in parallel don't interfere with each other's tasks
 
 ## Monitoring
 

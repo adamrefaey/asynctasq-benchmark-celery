@@ -82,19 +82,24 @@ check-health:
 # Workers
 # ============================================================================
 
-# Start AsyncTasQ worker (foreground)
+# Start AsyncTasQ worker (foreground) - uses Redis DB 0
 worker-asynctasq:
-    @echo "🚀 Starting AsyncTasQ worker..."
-    python -m asynctasq worker --queue default --concurrency 10
+    @echo "🚀 Starting AsyncTasQ worker (Redis DB 0)..."
+    ASYNCTASQ_REDIS_URL=redis://localhost:6379/0 python -m asynctasq worker --queue default --concurrency 10
 
-# Start Celery worker (foreground)
+# Start Celery worker (foreground) - uses Redis DB 1 (broker) and DB 2 (backend)
 worker-celery:
-    @echo "🚀 Starting Celery worker..."
-    uv run celery -A tasks.celery_tasks worker --loglevel=info --concurrency=10
+    @echo "🚀 Starting Celery worker (Redis DB 1 & 2)..."
+    CELERY_BROKER_URL=redis://localhost:6379/1 CELERY_RESULT_BACKEND=redis://localhost:6379/2 uv run celery -A tasks.celery_tasks worker --loglevel=info --concurrency=10
 
 # ============================================================================
 # Benchmarking
 # ============================================================================
+
+# Verify database separation is configured correctly
+verify-separation:
+    @echo "🔍 Verifying Redis database separation..."
+    uv run python verify_database_separation.py
 
 # Run all benchmark scenarios (requires workers to be running!)
 benchmark-all:

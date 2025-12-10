@@ -25,6 +25,13 @@ async def run_asynctasq(config: BenchmarkConfig) -> BenchmarkResult:
     Returns:
         Benchmark results
     """
+    import os
+    from asynctasq.config import set_global_config
+    
+    # CRITICAL: Ensure Redis DB 0 is used for AsyncTasQ (not Celery's DB 1/2)
+    redis_url = os.getenv("ASYNCTASQ_REDIS_URL", "redis://localhost:6379/0")
+    set_global_config(driver="redis", redis_url=redis_url)
+    
     from tasks.asynctasq_tasks import ComputeHashProcess
 
     task_timings: list[TaskTiming] = []
