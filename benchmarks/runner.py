@@ -30,7 +30,20 @@ SCENARIOS: dict[str, Any] = {
         "task_count": 20000,
         "worker_count": 10,
     },
-    # Add more scenarios as they're implemented
+    "2": {
+        "name": "I/O-Bound Workload",
+        "module": "benchmarks.scenario_2_io_bound",
+        "description": "Simulated HTTP API calls with async concurrency",
+        "task_count": 5000,
+        "worker_count": 10,
+    },
+    "3": {
+        "name": "CPU-Bound Workload",
+        "module": "benchmarks.scenario_3_cpu_bound",
+        "description": "Heavy computation testing GIL handling and parallelism",
+        "task_count": 1000,
+        "worker_count": 4,
+    },
 }
 
 
