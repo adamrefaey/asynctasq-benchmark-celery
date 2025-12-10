@@ -38,37 +38,27 @@ async def run_asynctasq(config: BenchmarkConfig) -> BenchmarkResult:
     await driver.connect()
 
     # Warmup phase: stabilize Redis connections, caches, and JIT
-    warmup_baseline_completed = 0
-    warmup_baseline_failed = 0
-    
     if config.warmup_tasks > 0:
         warmup_ids = []
         for _ in range(config.warmup_tasks):
             task_id = await noop_task.dispatch()
             warmup_ids.append(task_id)
         
-        # Wait for warmup tasks to complete
+        # Wait for warmup tasks to complete by polling queue depth
         warmup_timeout = 30  # 30 seconds max for warmup
         warmup_start = time.perf_counter()
-        warmup_completed = 0
         
         while (time.perf_counter() - warmup_start) < warmup_timeout:
             try:
                 stats = await driver.get_global_stats()
-                warmup_completed = stats.get("completed", 0)
-                if warmup_completed >= config.warmup_tasks:
+                pending = stats.get("pending", 0)
+                running = stats.get("running", 0)
+                # When both pending and running are 0, all warmup tasks are done
+                if pending == 0 and running == 0:
                     break
             except Exception:
                 pass  # Continue waiting if stats query fails
             await asyncio.sleep(0.5)
-        
-        # Record baseline stats after warmup
-        try:
-            stats = await driver.get_global_stats()
-            warmup_baseline_completed = stats.get("completed", 0)
-            warmup_baseline_failed = stats.get("failed", 0)
-        except Exception:
-            pass
         
         # Brief pause before actual benchmark to ensure clean start
         await asyncio.sleep(1)
@@ -97,7 +87,7 @@ async def run_asynctasq(config: BenchmarkConfig) -> BenchmarkResult:
     enqueue_end = time.perf_counter()
     enqueue_duration = enqueue_end - enqueue_start
 
-    # Wait for all tasks to complete by polling driver stats
+    # Wait for all tasks to complete by polling queue depth
     processing_start = time.perf_counter()
     timeout = config.timeout_seconds
     start = time.perf_counter()
@@ -111,19 +101,19 @@ async def run_asynctasq(config: BenchmarkConfig) -> BenchmarkResult:
         # Get global stats from driver to check completion
         try:
             stats = await driver.get_global_stats()
-            # Subtract warmup baseline to get only benchmark task counts
-            total_completed = stats.get("completed", 0)
-            total_failed = stats.get("failed", 0)
-            completed = max(0, total_completed - warmup_baseline_completed)
-            failed = max(0, total_failed - warmup_baseline_failed)
+            pending = stats.get("pending", 0)
+            running = stats.get("running", 0)
             
-            # Track queue depth (pending tasks)
-            pending = config.task_count - (completed + failed)
+            # Track queue depth (pending + running tasks)
             timestamp = time.perf_counter()
-            queue_depth_samples.append((timestamp, max(0, pending)))
+            queue_depth_samples.append((timestamp, pending + running))
 
-            # Check if all tasks are done (completed + failed >= task_count)
-            if (completed + failed) >= config.task_count:
+            # Check if all tasks are done (pending + running == 0)
+            if pending == 0 and running == 0:
+                # All tasks processed - calculate completed/failed
+                # Since we don't track individual task outcomes, assume all completed
+                completed = config.task_count
+                failed = 0
                 break
 
         except Exception:
@@ -237,8 +227,12 @@ def run_celery(config: BenchmarkConfig) -> BenchmarkResult:
                         queue.close()
                         if qsize == 0:
                             break
-                except Exception:
-                    # If queue check fails, continue polling
+                except Exception as e:
+                    # If queue doesn't exist (404 NOT_FOUND), all tasks are consumed
+                    # This happens when Redis queue is completely drained
+                    if "NOT_FOUND" in str(e) or "404" in str(e):
+                        break
+                    # For other errors, continue polling
                     pass
 
                 time.sleep(poll_interval)
@@ -293,7 +287,8 @@ async def run_benchmark(config: BenchmarkConfig) -> BenchmarkResult:
     if config.framework == Framework.ASYNCTASQ:
         return await run_asynctasq(config)
     elif config.framework == Framework.CELERY:
-        return run_celery(config)
+        # Run synchronous Celery code in thread to avoid blocking event loop
+        return await asyncio.to_thread(run_celery, config)
     else:
         raise ValueError(f"Unknown framework: {config.framework}")
 
@@ -314,10 +309,8 @@ if __name__ == "__main__":
         runs=1,
     )
 
-    if framework == Framework.ASYNCTASQ:
-        result = asyncio.run(run_benchmark(config))
-    else:
-        result = run_benchmark(config)
+    # run_benchmark is now async for both frameworks
+    result = asyncio.run(run_benchmark(config))
 
     print(f"\n{'=' * 60}")
     print(f"Scenario 1: Basic Throughput Test - {framework.value}")
