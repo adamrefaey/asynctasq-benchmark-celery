@@ -27,13 +27,13 @@ async def run_asynctasq(config: BenchmarkConfig) -> BenchmarkResult:
     Returns:
         Benchmark results
     """
-    from asynctasq.config import Config
+    from asynctasq.config import get_global_config
     from asynctasq.core.driver_factory import DriverFactory
 
     from tasks.asynctasq_tasks import ComputeHashProcess
 
-    # Initialize driver to query task status - explicitly use Redis DB 0
-    cfg = Config(redis_url="redis://localhost:6379/0")
+    # Get global config (set by runner for database isolation)
+    cfg = get_global_config()
     driver = DriverFactory.create_from_config(cfg)
     await driver.connect()
 

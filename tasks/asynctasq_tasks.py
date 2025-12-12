@@ -1,6 +1,14 @@
 """AsyncTasQ task definitions for benchmarking.
 
 All task types used in the benchmark scenarios with proper type hints.
+
+Task Type Selection Guide:
+- AsyncTask: async I/O-bound (API calls, async DB queries) - 90% of use cases
+- SyncTask: sync/blocking I/O (requests library, sync DB drivers)
+- AsyncProcessTask: async CPU-intensive (ML inference with async I/O)
+- SyncProcessTask: sync CPU-intensive (data processing, encryption)
+- @task decorator: Simple function-based tasks with auto-detection
+- @task(process=True): CPU-bound function tasks via ProcessPoolExecutor
 """
 
 from __future__ import annotations
@@ -10,7 +18,14 @@ import hashlib
 import json
 from typing import Any
 
-from asynctasq.tasks import BaseTask, SyncProcessTask, SyncTask, task
+from asynctasq.tasks import (
+    AsyncProcessTask,
+    AsyncTask,
+    BaseTask,
+    SyncProcessTask,
+    SyncTask,
+    task,
+)
 import httpx
 
 # ============================================================================
@@ -115,6 +130,24 @@ def parse_json_sync(json_string: str) -> dict[str, Any]:
     return json.loads(json_string)
 
 
+@task(process=True, queue="cpu-bound")
+def compute_hash_func(data: bytes, iterations: int = 100000) -> str:
+    """Compute hash in process pool using modern @task(process=True) syntax.
+
+    This is the recommended function-based approach for CPU-bound tasks.
+    Equivalent to SyncProcessTask but with simpler decorator syntax.
+
+    Args:
+        data: Data to hash
+        iterations: Number of PBKDF2 iterations
+
+    Returns:
+        Hex-encoded hash result
+    """
+    result = hashlib.pbkdf2_hmac("sha256", data, b"salt", iterations)
+    return result.hex()
+
+
 class ComputeFactorialSync(SyncTask[int]):
     """Compute factorial in thread pool (moderate CPU work).
 
@@ -161,6 +194,41 @@ class HashDataHeavyProcess(SyncProcessTask[str]):
     def execute(self) -> str:
         """Hash data using SHA256 in separate process."""
         return hashlib.sha256(self.data).hexdigest()
+
+
+class FetchUserAsync(AsyncTask[dict[str, Any]]):
+    """Fetch user data using modern AsyncTask class (I/O-bound).
+
+    AsyncTask is the recommended base class for async I/O-bound operations.
+    Use this for 90% of async tasks (API calls, async DB queries, file I/O).
+    """
+
+    user_id: int
+    base_url: str = "http://localhost:8080"
+
+    async def execute(self) -> dict[str, Any]:
+        """Fetch user data from mock API."""
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{self.base_url}/users/{self.user_id}?latency=100")
+            response.raise_for_status()
+            return response.json()
+
+
+class ComputeHashAsyncProcess(AsyncProcessTask[str]):
+    """Compute hash using AsyncProcessTask (CPU-bound with async interface).
+
+    Use AsyncProcessTask when you need async CPU-intensive operations
+    (e.g., ML inference with async preprocessing). Runs in process pool.
+    """
+
+    data: bytes
+    iterations: int = 100000
+
+    async def execute(self) -> str:
+        """Compute PBKDF2 hash in subprocess with async interface."""
+        # This runs in a separate process, bypassing the GIL
+        result = hashlib.pbkdf2_hmac("sha256", self.data, b"salt", self.iterations)
+        return result.hex()
 
 
 # Anti-pattern example (for documentation purposes)
