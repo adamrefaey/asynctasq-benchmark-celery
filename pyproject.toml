@@ -18,6 +18,8 @@ dependencies = [
     # Redis: Latest stable with hiredis for performance
     "redis[hiredis]>=7.1.0",
     
+    # Asyncio loop
+    "uvloop>=0.21.0",
     
     # HTTP clients for I/O-bound benchmarks
     "httpx>=0.28.1",

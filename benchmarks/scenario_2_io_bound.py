@@ -42,14 +42,25 @@ async def run_asynctasq(config: BenchmarkConfig) -> BenchmarkResult:
         # Manually delete Redis keys since driver doesn't have purge_queue
         # This ensures no leftover tasks from previous runs affect results
         if hasattr(driver, "client") and driver.client:
-            await driver.client.delete(
-                "queue:default",
-                "queue:default:processing",
-                "queue:default:delayed",
-                "queue:default:dead",
-            )
-        else:
-            pass
+            # Use get_all_queue_names if available to clean everything
+            queues = ["default"]
+            if hasattr(driver, "get_all_queue_names"):
+                try:
+                    discovered = await driver.get_all_queue_names()
+                    if discovered:
+                        queues = discovered
+                except Exception:
+                    pass
+
+            for q in queues:
+                await driver.client.delete(
+                    f"queue:{q}",
+                    f"queue:{q}:processing",
+                    f"queue:{q}:delayed",
+                    f"queue:{q}:dead",
+                    f"queue:{q}:stats:completed",
+                    f"queue:{q}:stats:failed",
+                )
     except Exception as e:
         print(f"[AsyncTasQ] Warning: Could not purge queue: {e}")
         # Continue anyway - workers should handle existing tasks

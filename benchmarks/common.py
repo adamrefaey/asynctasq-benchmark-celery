@@ -52,6 +52,18 @@ class BenchmarkConfig:
 
 
 @dataclass
+class WorkerConfig:
+    """Configuration for worker processes."""
+
+    framework: Framework
+    concurrency: int = 4
+    worker_count: int = 1
+    pool: str = "prefork"  # celery only: prefork, gevent, threads
+    queues: list[str] = field(default_factory=lambda: ["default"])
+    app_path: str = ""  # e.g. tasks.celery_tasks
+
+
+@dataclass
 class TaskTiming:
     """Timing data for a single task."""
 
