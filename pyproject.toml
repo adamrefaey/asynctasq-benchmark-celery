@@ -3,7 +3,7 @@ name = "asynctasq-benchmark-celery"
 version = "0.1.0"
 description = "Comprehensive benchmarking suite for AsyncTasQ vs Celery"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.13"
 license = { text = "MIT" }
 authors = [{ name = "AsyncTasQ Contributors" }]
 
@@ -13,7 +13,7 @@ dependencies = [
     "kombu>=5.6.0",
     
     # AsyncTasQ
-    "asynctasq>=0.9.14",
+    "asynctasq>=0.9.15",
     
     # Redis: Latest stable with hiredis for performance
     "redis[hiredis]>=7.1.0",
@@ -67,7 +67,7 @@ dev = [
 
 [tool.ruff]
 line-length = 100
-target-version = "py314"
+target-version = "py313"
 
 [tool.ruff.lint]
 select = [
@@ -94,7 +94,7 @@ max-returns = 6
 max-statements = 50
 
 [tool.pyright]
-pythonVersion = "3.14"
+pythonVersion = "3.13"
 typeCheckingMode = "basic"  # Use basic mode for better compatibility with external libraries
 reportMissingImports = false  # Many packages don't have type stubs
 reportMissingTypeStubs = false
