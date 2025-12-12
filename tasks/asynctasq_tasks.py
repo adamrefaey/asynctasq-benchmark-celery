@@ -10,7 +10,7 @@ import hashlib
 import json
 from typing import Any
 
-from asynctasq.tasks import BaseTask, ProcessTask, SyncTask, task
+from asynctasq.tasks import BaseTask, SyncProcessTask, SyncTask, task
 import httpx
 
 # ============================================================================
@@ -124,7 +124,7 @@ class ComputeFactorialSync(SyncTask[int]):
 
     number: int
 
-    def handle_sync(self) -> int:
+    def execute(self) -> int:
         """Compute factorial synchronously in thread pool."""
         result = 1
         for i in range(1, self.number + 1):
@@ -132,7 +132,7 @@ class ComputeFactorialSync(SyncTask[int]):
         return result
 
 
-class ComputeHashProcess(ProcessTask[str]):
+class ComputeHashProcess(SyncProcessTask[str]):
     """Compute hash in separate process (heavy CPU work).
 
     Uses ProcessPoolExecutor with independent GIL.
@@ -143,13 +143,13 @@ class ComputeHashProcess(ProcessTask[str]):
     data: bytes
     iterations: int = 100000
 
-    def handle_process(self) -> str:
+    def execute(self) -> str:
         """Compute PBKDF2 hash in separate process (bypasses GIL)."""
         result = hashlib.pbkdf2_hmac("sha256", self.data, b"salt", self.iterations)
         return result.hex()
 
 
-class HashDataHeavyProcess(ProcessTask[str]):
+class HashDataHeavyProcess(SyncProcessTask[str]):
     """Hash 10MB of data (heavy CPU-bound work in process).
 
     This is the recommended approach for heavy CPU work in AsyncTasQ.
@@ -158,7 +158,7 @@ class HashDataHeavyProcess(ProcessTask[str]):
 
     data: bytes
 
-    def handle_process(self) -> str:
+    def execute(self) -> str:
         """Hash data using SHA256 in separate process."""
         return hashlib.sha256(self.data).hexdigest()
 
@@ -173,7 +173,7 @@ class BlockingCPUTask(BaseTask[int]):
 
     number: int
 
-    async def handle(self) -> int:
+    async def run(self) -> int:
         """Compute factorial synchronously (BLOCKS EVENT LOOP)."""
         result = 1
         for i in range(1, self.number + 1):
@@ -200,12 +200,12 @@ def mixed_cpu_light(data: str) -> dict[str, Any]:
     return json.loads(data)
 
 
-class MixedCPUHeavy(ProcessTask[str]):
+class MixedCPUHeavy(SyncProcessTask[str]):
     """Heavy CPU task (10% of mixed workload) - hashing in process."""
 
     data: bytes
 
-    def handle_process(self) -> str:
+    def execute(self) -> str:
         """Hash data in separate process."""
         return hashlib.sha256(self.data).hexdigest()
 
