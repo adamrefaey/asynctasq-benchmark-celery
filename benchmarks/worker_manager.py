@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 import os
 from pathlib import Path
 import signal
@@ -12,80 +13,93 @@ console = Console()
 
 
 class WorkerManager:
-    def __init__(self):
+    """Fire-and-forget worker launcher used by the benchmark runner."""
+
+    def __init__(self) -> None:
         self.processes: list[subprocess.Popen] = []
         self.log_dir = Path("logs")
         self.log_dir.mkdir(exist_ok=True)
 
-    def start_workers(self, config: WorkerConfig):
+    def start_workers(self, configs: Sequence[WorkerConfig]) -> None:
+        """Start one or more worker groups based on the provided configs."""
+
+        if not configs:
+            console.print("[yellow]No worker configs provided; assuming manual workers.[/yellow]")
+            return
+
         self.stop_workers()
 
-        cmd = []
+        for config in configs:
+            self._launch_group(config)
+
+    def _launch_group(self, config: WorkerConfig) -> None:
         env = os.environ.copy()
-        # Ensure current directory is in PYTHONPATH
+        env.update(config.env_overrides)
         env["PYTHONPATH"] = os.getcwd() + os.pathsep + env.get("PYTHONPATH", "")
 
-        if config.framework == Framework.CELERY:
-            # Celery command
-            # celery -A tasks.celery_tasks worker --loglevel=INFO --concurrency=...
-            cmd = [
-                "celery",
-                "-A",
-                config.app_path,
-                "worker",
-                "--loglevel=INFO",
-                f"--concurrency={config.concurrency}",
-                f"--pool={config.pool}",
-                "-O",
-                "fair",
-                # "-E", # Enable events for monitoring if needed
-            ]
-            # Add queues if specified
-            if config.queues:
-                cmd.extend(["-Q", ",".join(config.queues)])
+        if config.framework == Framework.CELERY and config.prefetch_multiplier is not None:
+            env.setdefault("CELERY_WORKER_PREFETCH_MULTIPLIER", str(config.prefetch_multiplier))
 
-        elif config.framework == Framework.ASYNCTASQ:
-            # AsyncTasQ command
-            # asynctasq worker --concurrency ...
-            # Note: asynctasq CLI doesn't take an app path, but relies on importability of tasks
-            # We assume tasks are defined in tasks.asynctasq_tasks and will be imported by the worker
-            # when deserializing if they are in PYTHONPATH.
-            # However, to be safe, we might want to preload them if possible, but the CLI doesn't support it.
-            # We rely on the fact that we are running from the root and tasks.asynctasq_tasks is importable.
+        cmd = self._build_command(config)
+        console.print(
+            f"[bold blue]Starting {config.worker_count} {config.framework.value} worker(s) ({config.description or 'no description'})...[/bold blue]"
+        )
+        console.print(f"[dim]Command: {' '.join(cmd)}[/dim]")
 
-            cmd = [
+        for idx in range(config.worker_count):
+            log_file = self.log_dir / f"{config.framework.value}_worker_{idx}.log"
+            with open(log_file, "w", encoding="utf-8") as handle:
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=handle,
+                    stderr=subprocess.STDOUT,
+                    env=env,
+                    cwd=os.getcwd(),
+                    preexec_fn=os.setsid,
+                )
+                self.processes.append(process)
+
+        time.sleep(5)
+
+    def _build_command(self, config: WorkerConfig) -> list[str]:
+        if config.framework == Framework.ASYNCTASQ:
+            cmd: list[str] = [
+                "uv",
+                "run",
+                "python",
+                "-m",
                 "asynctasq",
                 "worker",
                 "--concurrency",
                 str(config.concurrency),
-                "--loglevel",
-                "INFO",
+                "--log-level",
+                config.log_level.lower(),
             ]
-            # Add queues if specified
             if config.queues:
                 cmd.extend(["--queues", ",".join(config.queues)])
+            cmd.extend(config.extra_args)
+            return cmd
 
-        console.print(
-            f"[bold blue]Starting {config.worker_count} {config.framework} workers...[/bold blue]"
-        )
-        console.print(f"[dim]Command: {' '.join(cmd)}[/dim]")
+        if config.framework == Framework.CELERY:
+            cmd = [
+                "uv",
+                "run",
+                "celery",
+                "-A",
+                config.app_path or "tasks.celery_tasks",
+                "worker",
+                f"--loglevel={config.log_level.lower()}",
+                f"--concurrency={config.concurrency}",
+                f"--pool={config.pool}",
+            ]
+            if config.autoscale:
+                cmd.append(f"--autoscale={config.autoscale[0]},{config.autoscale[1]}")
+            if config.queues:
+                cmd.extend(["-Q", ",".join(config.queues)])
+            cmd.extend(config.extra_args)
+            return cmd
 
-        for i in range(config.worker_count):
-            log_file = self.log_dir / f"{config.framework}_worker_{i}.log"
-            with open(log_file, "w") as f:
-                p = subprocess.Popen(
-                    cmd,
-                    stdout=f,
-                    stderr=subprocess.STDOUT,
-                    env=env,
-                    cwd=os.getcwd(),
-                    preexec_fn=os.setsid,  # Create new process group for clean kill
-                )
-                self.processes.append(p)
-
-        # Wait for workers to be ready (naive wait)
-        # Ideally we would check for a "ready" log message
-        time.sleep(5)
+        raise ValueError(f"Unsupported framework: {config.framework}")
 
     def stop_workers(self):
         if not self.processes:

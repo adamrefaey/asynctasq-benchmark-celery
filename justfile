@@ -215,12 +215,17 @@ format:
 lint-fix:
     uv run ruff check --fix .
 
+# Fast lint/type smoke test
+check:
+    uv run ruff check .
+    uv run pyright .
+
 # Run type checker
 typecheck:
     uv run pyright .
 
 # Full CI pipeline
-ci: format lint-fix typecheck
+ci: format lint-fix check
     @echo "✅ All CI checks passed!"
     @echo "✅ CI pipeline passed"
 

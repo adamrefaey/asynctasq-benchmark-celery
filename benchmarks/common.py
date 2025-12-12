@@ -5,11 +5,14 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from enum import Enum
+import itertools
+import math
 import os
 import statistics
 import time
 from typing import Any
 
+from hdrhistogram import HdrHistogram
 import psutil
 
 
@@ -36,6 +39,8 @@ class BenchmarkConfig:
     """Configuration for a benchmark run."""
 
     framework: Framework
+    scenario_id: str = ""
+    scenario_name: str = ""
     driver: Driver | None = None  # Only for AsyncTasQ
     worker_count: int = 10
     task_count: int = 20000
@@ -61,6 +66,32 @@ class WorkerConfig:
     pool: str = "prefork"  # celery only: prefork, gevent, threads
     queues: list[str] = field(default_factory=lambda: ["default"])
     app_path: str = ""  # e.g. tasks.celery_tasks
+
+    # Operational knobs
+    log_level: str = "INFO"
+    env_overrides: dict[str, str] = field(default_factory=dict)
+    prefetch_multiplier: int | None = None
+    autoscale: tuple[int, int] | None = None  # max, min
+    extra_args: list[str] = field(default_factory=list)
+    description: str = ""
+
+
+@dataclass(frozen=True)
+class ScenarioDefinition:
+    """Declarative scenario metadata used by the runner."""
+
+    id: str
+    name: str
+    module: str
+    description: str
+    task_count: int
+    worker_count: int
+    warmup_seconds: int = 0
+    tags: tuple[str, ...] = ()
+    requirements: tuple[str, ...] = ()
+    implemented: bool = True
+    worker_profiles: dict[Framework, WorkerConfig] = field(default_factory=dict)
+    notes: str = ""
 
 
 @dataclass
@@ -164,20 +195,27 @@ class BenchmarkResult:
     @property
     def p95_latency(self) -> float:
         """95th percentile latency in milliseconds."""
-        latencies = sorted(self.latencies)
-        if not latencies:
-            return 0.0
-        index = int(len(latencies) * 0.95)
-        return latencies[index] * 1000
+        return self._percentile_latency(95.0)
 
     @property
     def p99_latency(self) -> float:
         """99th percentile latency in milliseconds."""
+        return self._percentile_latency(99.0)
+
+    def _percentile_latency(self, percentile: float) -> float:
+        """Return latency percentile using linear interpolation."""
         latencies = sorted(self.latencies)
         if not latencies:
             return 0.0
-        index = int(len(latencies) * 0.99)
-        return latencies[index] * 1000
+        rank = percentile / 100 * (len(latencies) - 1)
+        lower = math.floor(rank)
+        upper = math.ceil(rank)
+        if lower == upper:
+            return latencies[int(rank)] * 1000
+        lower_value = latencies[lower]
+        upper_value = latencies[upper]
+        interpolated = lower_value + (rank - lower) * (upper_value - lower_value)
+        return interpolated * 1000
 
 
 @dataclass
@@ -241,9 +279,29 @@ class BenchmarkSummary:
         stdev = statistics.stdev(values) if len(values) > 1 else 0.0
         return (stdev / mean) if mean > 0 else 0.0
 
+    @property
+    def high_percentile_latency_ms(self) -> dict[str, float]:
+        """High percentile latency (p99.9/p99.99) using HDR Histogram."""
+        latencies_ms = list(itertools.chain.from_iterable(r.latencies for r in self.results))
+        latencies_ms = [value * 1000 for value in latencies_ms]
+        if not latencies_ms:
+            return {"p999": 0.0, "p9999": 0.0}
+
+        histogram = HdrHistogram(1, 600_000, 3)  # Up to 10 minutes in ms
+        for value in latencies_ms:
+            histogram.record_value(int(max(1, value)))
+
+        return {
+            "p999": histogram.get_value_at_percentile(99.9) / 1000,
+            "p9999": histogram.get_value_at_percentile(99.99) / 1000,
+        }
+
     def to_dict(self) -> dict[str, Any]:
         """Convert summary to dictionary for serialization."""
         return {
+            "scenario": self.config.scenario_name or self.config.scenario_id,
+            "scenario_id": self.config.scenario_id,
+            "scenario_name": self.config.scenario_name,
             "framework": self.config.framework.value,
             "driver": self.config.driver.value if self.config.driver else None,
             "worker_count": self.config.worker_count,
@@ -254,6 +312,7 @@ class BenchmarkSummary:
             "mean_latency_ms": self.mean_latency_stats,
             "p95_latency_ms": self.p95_latency_stats,
             "p99_latency_ms": self.p99_latency_stats,
+            "high_percentiles_ms": self.high_percentile_latency_ms,
             "memory_mb": self.memory_stats,
             "cpu_percent": self.cpu_stats,
         }

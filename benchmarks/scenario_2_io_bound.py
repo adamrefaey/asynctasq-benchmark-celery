@@ -65,9 +65,8 @@ async def run_asynctasq(config: BenchmarkConfig) -> BenchmarkResult:
         print(f"[AsyncTasQ] Warning: Could not purge queue: {e}")
         # Continue anyway - workers should handle existing tasks
 
-    # NOTE: Warmup is handled by workers being pre-started.
-    # The benchmark assumes workers are already running and ready to process tasks.
-    # This avoids the benchmark script needing to manage worker lifecycle.
+    if config.warmup_seconds:
+        await asyncio.sleep(config.warmup_seconds)
 
     task_timings: list[TaskTiming] = []
 
@@ -231,6 +230,9 @@ def run_celery(config: BenchmarkConfig) -> BenchmarkResult:
     from kombu import Connection
 
     from tasks.celery_tasks import app, fetch_user_http
+
+    if config.warmup_seconds:
+        time.sleep(config.warmup_seconds)
 
     task_timings: list[TaskTiming] = []
 

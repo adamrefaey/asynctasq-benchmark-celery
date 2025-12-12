@@ -72,9 +72,9 @@ just docker-up-mock  # Includes Mock API on port 8080
 just verify-separation  # Checks AsyncTasQ (DB 0) vs Celery (DB 1 & 2)
 ```
 
-**Step 4: Start workers** (separate terminals)
+**Step 4: (Optional) Start workers manually**
 
-> **CRITICAL:** Workers must be started BEFORE running benchmarks. The benchmark runner does not auto-start workers.
+> The new runner auto-starts scenario-specific workers by default (`--auto-workers`). Only follow the manual steps below if you pass `--no-auto-workers`.
 
 ```bash
 # Terminal 1: AsyncTasQ worker
@@ -86,9 +86,11 @@ just worker-celery
 
 **Step 5: Run benchmarks** (new terminal)
 ```bash
-just benchmark-all   # All scenarios
-just benchmark 1     # Single scenario
-just benchmark-quick # Quick test (1 run per scenario)
+just benchmark-all                # All implemented scenarios with auto-managed workers
+just benchmark 1                  # Single scenario
+just benchmark-quick              # Quick test (1 run per scenario)
+just benchmark --no-auto-workers  # Reuse manually started workers
+just benchmark --list-scenarios   # Inspect catalog + requirements
 ```
 
 **Step 6: Generate reports**
@@ -152,25 +154,31 @@ asynctasq-benchmark-celery/
     └── summary_report.html
 ```
 
+### Scenario Catalog & Worker Profiles
+
+- **Registry:** `benchmarks/scenario_registry.py` defines every scenario with tags, warm-up durations, requirements, and per-framework worker profiles.
+- **Auto workers:** The runner reads these profiles to start Celery/AsyncTasQ workers with the appropriate pool (`prefork` for CPU, thread pool for HTTP) and tuned concurrency, matching the guidance from [Mahmud 2025](https://medium.com/@sizanmahmud08/mastering-celery-a-complete-guide-to-task-management-database-connections-and-scaling-417b15eefc07).
+- **Future roadmap:** Scenarios 5-11 are documented in the registry even if not implemented yet, so you can plan infrastructure ahead of time or contribute new workloads without touching the orchestrator.
+
 ## Benchmark Scenarios
 
 ### Overview
 
-11 planned scenarios testing different performance characteristics (currently 3 implemented):
+11 planned scenarios testing different performance characteristics (currently 4 implemented):
 
-| # | Scenario | Description | Key Metrics | Requirements |
-|---|----------|-------------|-------------|------------|
-| 1 | Basic Throughput | 20k minimal tasks | tasks/sec, enqueue rate | Redis only |
-| 2 | I/O-Bound | HTTP requests with mock server | async scaling efficiency | Mock API required |
-| 3 | CPU-Bound | ProcessTask vs prefork | GIL impact, parallelism | Redis only |
-| 4 | Mixed Workload | 60% I/O, 30% light CPU, 10% heavy | realistic performance | Mock API required |
-| 5 | Serialization | msgpack vs JSON/pickle, ORM | payload size, speed | Redis only |
-| 6 | Scalability | 1k → 100k task ramp | saturation, queue depth | Redis only |
-| 7 | Real-World | E-commerce order pipeline | end-to-end latency, retries | Mock API required |
-| 8 | Cold Start | Worker initialization | startup time, first task | Redis only |
-| 9 | Multi-Queue | Priority queues, routing | queue management | Redis only |
-| 10 | Event Streaming | Redis Pub/Sub overhead | event delivery latency | Redis only |
-| 11 | FastAPI Integration | Lifespan integration | HTTP dispatch | Redis only |
+| #   | Scenario            | Description                       | Key Metrics                 | Requirements      |
+| --- | ------------------- | --------------------------------- | --------------------------- | ----------------- |
+| 1   | Basic Throughput    | 20k minimal tasks                 | tasks/sec, enqueue rate     | Redis only        |
+| 2   | I/O-Bound           | HTTP requests with mock server    | async scaling efficiency    | Mock API required |
+| 3   | CPU-Bound           | ProcessTask vs prefork            | GIL impact, parallelism     | Redis only        |
+| 4   | Mixed Workload      | 60% I/O, 30% light CPU, 10% heavy | realistic performance       | Mock API required |
+| 5   | Serialization       | msgpack vs JSON/pickle, ORM       | payload size, speed         | Redis only        |
+| 6   | Scalability         | 1k → 100k task ramp               | saturation, queue depth     | Redis only        |
+| 7   | Real-World          | E-commerce order pipeline         | end-to-end latency, retries | Mock API required |
+| 8   | Cold Start          | Worker initialization             | startup time, first task    | Redis only        |
+| 9   | Multi-Queue         | Priority queues, routing          | queue management            | Redis only        |
+| 10  | Event Streaming     | Redis Pub/Sub overhead            | event delivery latency      | Redis only        |
+| 11  | FastAPI Integration | Lifespan integration              | HTTP dispatch               | Redis only        |
 
 ### Execution Models Tested
 
@@ -311,21 +319,26 @@ just docker-logs              # Tail service logs
 
 Performance targets based on production workloads:
 
-| Metric | AsyncTasQ Target | Celery Baseline |
-|--------|------------------|-----------------|
-| **I/O Throughput** | >5,000 tasks/sec | ~1,500 tasks/sec |
-| **CPU Throughput** | Match Celery prefork | Baseline (prefork) |
-| Mean Latency | <50ms | ~200ms |
-| P99 Latency | <300ms | ~1000ms |
-| Serialization (ORM) | 90% payload reduction | Manual (N/A) |
-| Worker Memory | <100MB | ~150MB (prefork) |
-| Startup Time | <100ms | ~500ms (prefork pool) |
+| Metric              | AsyncTasQ Target      | Celery Baseline       |
+| ------------------- | --------------------- | --------------------- |
+| **I/O Throughput**  | >5,000 tasks/sec      | ~1,500 tasks/sec      |
+| **CPU Throughput**  | Match Celery prefork  | Baseline (prefork)    |
+| Mean Latency        | <50ms                 | ~200ms                |
+| P99 Latency         | <300ms                | ~1000ms               |
+| Serialization (ORM) | 90% payload reduction | Manual (N/A)          |
+| Worker Memory       | <100MB                | ~150MB (prefork)      |
+| Startup Time        | <100ms                | ~500ms (prefork pool) |
 
 ### Statistical Significance
 
 - All comparisons include **t-tests** with p < 0.05 threshold
 - Report includes **effect size** (Cohen's d) for practical significance
 - Confidence intervals: 95% for all metrics
+
+### Full Latency Distribution
+
+- Every run now records an HDR Histogram and surfaces **p99.9** and **p99.99** latencies, matching the methodology recommended by [Brave New Geek](https://bravenewgeek.com/benchmarking-message-queue-latency/) to avoid "average latency" traps.
+- Histograms capture up to 10 minutes of latency with 3 significant digits so you can spot long-tail issues that would be invisible in p95-only dashboards.
 
 ### Anti-Patterns Documentation
 
@@ -362,12 +375,17 @@ celery,1,20000,12.34,1620.7,123.4,98.2,456.7,892.1,142.3,68.9
 
 ```json
 {
-  "scenario": "throughput",
+  "scenario": "Basic Throughput",
+  "scenario_id": "1",
   "asynctasq": {
     "mean_throughput": 5739.4,
     "std_throughput": 58.3,
     "p95_latency": 46.4,
-    "cv": 0.01
+    "cv": 0.01,
+    "high_percentiles_ms": {
+      "p999": 75.1,
+      "p9999": 120.3
+    }
   },
   "celery": { ... },
   "t_test": {
@@ -405,9 +423,9 @@ For multi-driver AsyncTasQ benchmarks (PostgreSQL, MySQL, RabbitMQ, AWS SQS), se
 ### Adding New Scenarios
 
 1. Create `benchmarks/scenario_N_description.py`
-2. Implement `run_benchmark()` function returning `BenchmarkResult`
-3. Add scenario to `justfile` commands
-4. Update `analysis/report_generator.py` for new metrics
+2. Implement `run_benchmark()` returning `BenchmarkResult`
+3. Register metadata + worker profiles in `benchmarks/scenario_registry.py`
+4. Update docs/analysis as needed (charts, report text)
 5. Run `just ci` to validate (format, lint, typecheck, tests)
 
 ### Code Quality

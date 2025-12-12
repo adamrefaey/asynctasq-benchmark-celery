@@ -23,6 +23,12 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
 from benchmarks.common import BenchmarkConfig, BenchmarkSummary, Driver, Framework
+from benchmarks.scenario_registry import (
+    get_scenario_definition,
+    implemented_scenarios,
+    scenario_choices,
+)
+from benchmarks.worker_manager import WorkerManager
 
 console = Console()
 
@@ -45,37 +51,14 @@ def _ensure_asynctasq_config() -> None:
     console.print(f"[dim]AsyncTasQ configured: {redis_url}[/dim]")
 
 
-# Import all scenarios
-SCENARIOS: dict[str, Any] = {
-    "1": {
-        "name": "Basic Throughput",
-        "module": "benchmarks.scenario_1_throughput",
-        "description": "Minimal tasks with no I/O or CPU work",
-        "task_count": 20000,
-        "worker_count": 10,
-    },
-    "2": {
-        "name": "I/O-Bound Workload",
-        "module": "benchmarks.scenario_2_io_bound",
-        "description": "Simulated HTTP API calls with async concurrency",
-        "task_count": 5000,
-        "worker_count": 10,
-    },
-    "3": {
-        "name": "CPU-Bound Workload",
-        "module": "benchmarks.scenario_3_cpu_bound",
-        "description": "Heavy computation testing GIL handling and parallelism",
-        "task_count": 1000,
-        "worker_count": 4,
-    },
-}
-
-
 async def run_scenario(
-    scenario_id: str,
+    scenario_metadata: Any,
     framework: Framework,
     driver: Driver | None,
     runs: int,
+    *,
+    auto_workers: bool,
+    worker_manager: WorkerManager,
 ) -> BenchmarkSummary:
     """Run a single scenario multiple times.
 
@@ -88,32 +71,50 @@ async def run_scenario(
     Returns:
         Benchmark summary with statistics
     """
-    if scenario_id not in SCENARIOS:
-        raise ValueError(f"Unknown scenario: {scenario_id}")
-
-    scenario = SCENARIOS[scenario_id]
-
-    # Import scenario module dynamically
     import importlib
 
-    module = importlib.import_module(scenario["module"])
+    if not scenario_metadata.implemented:
+        raise ValueError(f"Scenario {scenario_metadata.id} is documented but not yet implemented.")
+
+    module = importlib.import_module(scenario_metadata.module)
 
     # Create config
     config = BenchmarkConfig(
         framework=framework,
         driver=driver,
-        task_count=scenario["task_count"],
-        worker_count=scenario["worker_count"],
+        task_count=scenario_metadata.task_count,
+        worker_count=scenario_metadata.worker_count,
         runs=runs,
+        warmup_seconds=scenario_metadata.warmup_seconds,
+        scenario_id=scenario_metadata.id,
+        scenario_name=scenario_metadata.name,
     )
 
-    console.print(f"\n[bold cyan]Running Scenario {scenario_id}: {scenario['name']}[/bold cyan]")
+    os.environ["BENCHMARK_SCENARIO"] = scenario_metadata.id
+    os.environ["BENCHMARK_SCENARIO_NAME"] = scenario_metadata.name
+
+    console.print(
+        f"\n[bold cyan]Running Scenario {scenario_metadata.id}: {scenario_metadata.name}[/bold cyan]"
+    )
     console.print(f"Framework: {framework.value}")
     if driver:
         console.print(f"Driver: {driver.value}")
     console.print(f"Tasks: {config.task_count}, Workers: {config.worker_count}, Runs: {runs}")
+    if scenario_metadata.requirements:
+        console.print(f"[dim]Requirements: {', '.join(scenario_metadata.requirements)}[/dim]")
 
     results = []
+
+    worker_started = False
+    if auto_workers:
+        profile = scenario_metadata.worker_profiles.get(framework)
+        if profile:
+            worker_manager.start_workers([profile])
+            worker_started = True
+        else:
+            console.print(
+                "[yellow]⚠ No worker profile found; assuming manual worker startup.[/yellow]"
+            )
 
     with Progress(
         SpinnerColumn(),
@@ -135,10 +136,13 @@ async def run_scenario(
             if run < runs:
                 await asyncio.sleep(1.0)
 
+    if worker_started:
+        worker_manager.stop_workers()
+
     summary = BenchmarkSummary(config=config, results=results)
 
     # Display results
-    _display_summary(scenario_id, scenario["name"], summary)
+    _display_summary(scenario_metadata.id, scenario_metadata.name, summary)
 
     return summary
 
@@ -234,6 +238,26 @@ def _display_summary(scenario_id: str, scenario_name: str, summary: BenchmarkSum
     console.print(f"\n{stability_msg}")
 
 
+def _print_scenario_catalog() -> None:
+    """Print a table of all documented scenarios."""
+
+    table = Table(title="Scenario Catalog")
+    table.add_column("ID", style="cyan", justify="right")
+    table.add_column("Name", style="green")
+    table.add_column("Status", style="yellow")
+    table.add_column("Tags", style="magenta")
+    table.add_column("Requirements", style="blue")
+
+    for scenario_id in scenario_choices(include_unimplemented=True):
+        meta = get_scenario_definition(scenario_id)
+        status = "ready" if meta.implemented else "planned"
+        tags = ", ".join(meta.tags) if meta.tags else "-"
+        reqs = ", ".join(meta.requirements) if meta.requirements else "-"
+        table.add_row(meta.id, meta.name, status, tags, reqs)
+
+    console.print(table)
+
+
 def save_results(summaries: list[BenchmarkSummary], output_dir: Path) -> None:
     """Save benchmark results to JSON files.
 
@@ -246,8 +270,7 @@ def save_results(summaries: list[BenchmarkSummary], output_dir: Path) -> None:
     for summary in summaries:
         framework = summary.config.framework.value
         driver = summary.config.driver.value if summary.config.driver else "default"
-        scenario_id = "unknown"  # TODO: Extract from config
-
+        scenario_id = summary.config.scenario_id or "unknown"
         filename = f"scenario_{scenario_id}_{framework}_{driver}.json"
         filepath = output_dir / filename
 
@@ -299,14 +322,30 @@ async def main() -> int:
         action="store_true",
         help="Run all scenarios",
     )
+    parser.add_argument(
+        "--list-scenarios",
+        action="store_true",
+        help="List available scenarios and exit",
+    )
+    parser.add_argument(
+        "--auto-workers",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Automatically start/stop workers per scenario (default: True)",
+    )
 
     args = parser.parse_args()
 
+    if args.list_scenarios:
+        _print_scenario_catalog()
+        return 0
+
     # Determine scenarios to run
-    if args.all or args.scenario is None:
-        scenario_ids = list(SCENARIOS.keys())
-    else:
+    available = implemented_scenarios()
+    if args.scenario:
         scenario_ids = [args.scenario]
+    else:
+        scenario_ids = list(available.keys()) if args.all else list(available.keys())
 
     # Determine frameworks to test
     if args.framework == "both":
@@ -327,15 +366,38 @@ async def main() -> int:
     console.print(f"Output: {args.output}\n")
 
     summaries: list[BenchmarkSummary] = []
+    worker_manager = WorkerManager()
 
     for scenario_id in scenario_ids:
+        scenario_meta = get_scenario_definition(scenario_id)
+
+        if not scenario_meta.implemented:
+            console.print(
+                f"[yellow]Skipping Scenario {scenario_meta.id} ({scenario_meta.name}) - not implemented yet.[/yellow]"
+            )
+            continue
+
         for framework in frameworks:
             if framework == Framework.ASYNCTASQ:
                 for driver in drivers:
-                    summary = await run_scenario(scenario_id, framework, driver, args.runs)
+                    summary = await run_scenario(
+                        scenario_meta,
+                        framework,
+                        driver,
+                        args.runs,
+                        auto_workers=args.auto_workers,
+                        worker_manager=worker_manager,
+                    )
                     summaries.append(summary)
             else:
-                summary = await run_scenario(scenario_id, framework, None, args.runs)
+                summary = await run_scenario(
+                    scenario_meta,
+                    framework,
+                    None,
+                    args.runs,
+                    auto_workers=args.auto_workers,
+                    worker_manager=worker_manager,
+                )
                 summaries.append(summary)
 
     # Save all results
